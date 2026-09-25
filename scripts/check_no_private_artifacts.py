@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 
-
 DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 RECEIPT_SUFFIXES = {
     ".heic",
