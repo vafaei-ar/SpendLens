@@ -3,11 +3,10 @@ from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from spendlens.money import currency_exponent, decimal_to_minor
 from spendlens.models import ReceiptExtraction
+from spendlens.money import currency_exponent, decimal_to_minor
 from spendlens.normalize import normalize_merchant
 from spendlens.storage import StoredSource
-
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;

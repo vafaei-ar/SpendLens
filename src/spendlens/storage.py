@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-
 _MIME_EXTENSIONS = {
     "application/pdf": ".pdf",
     "image/heic": ".heic",

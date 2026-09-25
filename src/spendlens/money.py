@@ -1,6 +1,5 @@
 from decimal import Decimal
 
-
 _ZERO_EXPONENT = {
     "BIF",
     "CLP",

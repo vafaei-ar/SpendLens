@@ -3,7 +3,6 @@ from pydantic import ValidationError
 from spendlens.models import ReceiptExtraction
 from spendlens.validation import ValidationReport
 
-
 _FIELD_ALIASES = {
     "merchant": "merchant",
     "date": "transaction_date",

@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict
 from spendlens.models import ReceiptExtraction, TransactionType
 from spendlens.normalize import normalize_merchant
 
-
 VALIDATOR_VERSION = "validator-v1"
 
 

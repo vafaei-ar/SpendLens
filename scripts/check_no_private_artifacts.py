@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 
 DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}

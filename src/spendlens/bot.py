@@ -1,5 +1,6 @@
 import asyncio
 import logging
+
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -38,7 +39,6 @@ from spendlens.models import ReceiptExtraction
 from spendlens.review import apply_correction, format_review
 from spendlens.storage import store_source_bytes
 from spendlens.validation import VALIDATOR_VERSION, validate_receipt
-
 
 LOGGER = logging.getLogger("spendlens.bot")
 SCHEMA_VERSION = "1"

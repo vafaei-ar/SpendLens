@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from spendlens.models import ReceiptExtraction
 
-
 PROMPT_VERSION = "receipt-v1"
 
 _RECEIPT_PROMPT = """Extract structured data from this purchase receipt.
