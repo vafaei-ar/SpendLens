@@ -36,7 +36,11 @@ def test_false_auto_accept_rate_is_measured() -> None:
 
     metrics = evaluate_cases(cases)
 
+    assert metrics.n == 2
+    assert metrics.prediction_rate == 1.0
     assert metrics.auto_accept_rate == 1.0
+    assert metrics.manual_review_rate == 0.0
     assert metrics.total_accuracy == 0.5
     assert metrics.critical_receipt_accuracy == 0.5
+    assert metrics.false_auto_accept_count == 1
     assert metrics.false_auto_accept_rate == 0.5
