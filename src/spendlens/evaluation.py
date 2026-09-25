@@ -8,6 +8,7 @@ from spendlens.normalize import normalize_merchant
 
 class EvaluationCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
     case_id: str
     truth: ReceiptExtraction
     prediction: ReceiptExtraction | None
@@ -16,6 +17,7 @@ class EvaluationCase(BaseModel):
 
 class EvaluationMetrics(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
     n: int
     merchant_accuracy: float
     date_accuracy: float
@@ -33,17 +35,35 @@ def evaluate_cases(
     if not cases:
         raise ValueError("At least one evaluation case is required")
 
-    merchant_correct = date_correct = total_correct = critical_correct = 0
-    auto_accepted = false_auto_accepted = 0
+    merchant_correct = 0
+    date_correct = 0
+    total_correct = 0
+    critical_correct = 0
+    auto_accepted = 0
+    false_auto_accepted = 0
 
     for case in cases:
         prediction = case.prediction
         merchant_ok = (
             prediction is not None
-            and normalize_merchant(prediction.merchant) == normalize_merchant(case.truth.merchant)
+            and case.truth.merchant is not None
+            and prediction.merchant is not None
+            and normalize_merchant(prediction.merchant)
+            == normalize_merchant(case.truth.merchant)
         )
-        date_ok = prediction is not None and prediction.transaction_date == case.truth.transaction_date
-        total_ok = prediction is not None and abs(prediction.total - case.truth.total) <= total_tolerance
+        date_ok = (
+            prediction is not None
+            and case.truth.transaction_date is not None
+            and prediction.transaction_date
+            == case.truth.transaction_date
+        )
+        total_ok = (
+            prediction is not None
+            and case.truth.total is not None
+            and prediction.total is not None
+            and abs(prediction.total - case.truth.total)
+            <= total_tolerance
+        )
         critical_ok = bool(merchant_ok and date_ok and total_ok)
 
         merchant_correct += int(merchant_ok)
@@ -56,6 +76,11 @@ def evaluate_cases(
             false_auto_accepted += int(not critical_ok)
 
     n = len(cases)
+    false_rate = (
+        false_auto_accepted / auto_accepted
+        if auto_accepted
+        else None
+    )
     return EvaluationMetrics(
         n=n,
         merchant_accuracy=merchant_correct / n,
@@ -63,5 +88,5 @@ def evaluate_cases(
         total_accuracy=total_correct / n,
         critical_receipt_accuracy=critical_correct / n,
         auto_accept_rate=auto_accepted / n,
-        false_auto_accept_rate=(false_auto_accepted / auto_accepted if auto_accepted else None),
+        false_auto_accept_rate=false_rate,
     )

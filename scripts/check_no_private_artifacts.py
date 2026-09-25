@@ -1,9 +1,17 @@
-import sys
 from pathlib import Path
+import sys
 
 
 DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
-RECEIPT_SUFFIXES = {".heic", ".heif", ".jpeg", ".jpg", ".pdf", ".png", ".webp"}
+RECEIPT_SUFFIXES = {
+    ".heic",
+    ".heif",
+    ".jpeg",
+    ".jpg",
+    ".pdf",
+    ".png",
+    ".webp",
+}
 SAFE_RECEIPT_PREFIX = "tests/fixtures/synthetic/"
 
 
@@ -23,8 +31,14 @@ def violation(path_text: str) -> str | None:
         return "local receipt source"
     if normalized.startswith("evaluation/private/"):
         return "private evaluation corpus"
-    if suffix in RECEIPT_SUFFIXES and not normalized.startswith(SAFE_RECEIPT_PREFIX):
-        return "image/PDF blocked by default; synthetic fixtures belong under tests/fixtures/synthetic/"
+    if (
+        suffix in RECEIPT_SUFFIXES
+        and not normalized.startswith(SAFE_RECEIPT_PREFIX)
+    ):
+        return (
+            "image/PDF blocked by default; synthetic fixtures belong under "
+            "tests/fixtures/synthetic/"
+        )
     return None
 
 

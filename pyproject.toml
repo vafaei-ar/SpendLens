@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spendlens"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first receipt capture and spending analysis"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-only" }
 authors = [{ name = "Alireza Vafaei Sadr" }]
 dependencies = [
+  "httpx>=0.28,<0.29",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.5,<3",
   "python-telegram-bot>=21.6,<23"

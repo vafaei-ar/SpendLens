@@ -2,7 +2,10 @@ from spendlens.evaluation import EvaluationCase, evaluate_cases
 from spendlens.models import ReceiptExtraction
 
 
-def receipt(merchant: str, total: str) -> ReceiptExtraction:
+def receipt(
+    merchant: str,
+    total: str,
+) -> ReceiptExtraction:
     return ReceiptExtraction.model_validate(
         {
             "merchant": merchant,
