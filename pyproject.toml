@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spendlens"
+version = "0.2.0"
+description = "Local-first receipt capture and spending analysis"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-only" }
+authors = [{ name = "Alireza Vafaei Sadr" }]
+dependencies = [
+  "httpx>=0.28,<0.29",
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.5,<3",
+  "python-telegram-bot>=21.6,<23"
+]
+
+[project.optional-dependencies]
+dev = ["pre-commit>=3.8,<5", "pytest>=8.3,<9", "ruff>=0.6,<1"]
+
+[project.scripts]
+spendlens-bot = "spendlens.bot:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spendlens"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

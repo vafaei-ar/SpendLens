@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "categories": [
+    "groceries",
+    "restaurants",
+    "household",
+    "transportation",
+    "health",
+    "personal_care",
+    "shopping",
+    "entertainment",
+    "travel",
+    "utilities",
+    "education",
+    "other"
+  ]
+}
