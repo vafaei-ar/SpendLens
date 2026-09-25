@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: spendlens-private-artifacts
+        name: block private SpendLens artifacts
+        entry: python scripts/check_no_private_artifacts.py
+        language: system
+        pass_filenames: true
