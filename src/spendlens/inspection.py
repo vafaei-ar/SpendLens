@@ -381,11 +381,15 @@ def format_latest(bundle: LatestBundle) -> str:
 
     if bundle.receipt is not None:
         receipt = bundle.receipt
+        total = _format_minor(
+            receipt["total_minor"],
+            receipt["currency_exponent"],
+            receipt["currency"],
+        )
         lines.append(
             f"Saved receipt #{receipt['id']}: "
             f"{receipt['merchant_raw']} · "
-            f"{receipt['transaction_date']} · "
-            f"{_format_minor(receipt['total_minor'], receipt['currency_exponent'], receipt['currency'])}"
+            f"{receipt['transaction_date']} · {total}"
         )
     elif bundle.review is not None and bundle.review["status"] == "open":
         lines.append(f"Review: open #{bundle.review['id']}")
