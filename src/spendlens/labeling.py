@@ -4,7 +4,6 @@ from decimal import Decimal, InvalidOperation
 
 from spendlens.models import ReceiptExtraction, TransactionType
 
-
 InputFn = Callable[[str], str]
 OutputFn = Callable[[str], None]
 
