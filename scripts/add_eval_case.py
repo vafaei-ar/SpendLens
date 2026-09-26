@@ -3,33 +3,8 @@ import json
 from pathlib import Path
 
 from spendlens.eval_corpus import SourceVariant, create_case
+from spendlens.labeling import interactive_truth
 from spendlens.models import ReceiptExtraction
-
-
-def _optional(prompt: str) -> str | None:
-    value = input(prompt).strip()
-    return value or None
-
-
-def _interactive_truth() -> ReceiptExtraction:
-    print("Enter human-verified receipt truth. Blank optional fields are allowed.")
-    payload = {
-        "merchant": input("Merchant: ").strip(),
-        "transaction_date": input("Transaction date (YYYY-MM-DD): ").strip(),
-        "transaction_time": _optional("Transaction time (HH:MM[:SS], optional): "),
-        "subtotal": _optional("Subtotal (optional): "),
-        "tax": _optional("Tax (optional): "),
-        "tip": _optional("Tip (optional): "),
-        "fees": _optional("Fees (optional): "),
-        "discount": _optional("Discount (optional): "),
-        "total": input("Total: ").strip(),
-        "currency": (input("Currency [USD]: ").strip() or "USD"),
-        "transaction_type": (
-            input("Transaction type [purchase]: ").strip() or "purchase"
-        ),
-        "line_items": [],
-    }
-    return ReceiptExtraction.model_validate(payload)
 
 
 def main() -> int:
@@ -63,7 +38,7 @@ def main() -> int:
             args.truth_json.read_text(encoding="utf-8")
         )
     else:
-        truth = _interactive_truth()
+        truth = interactive_truth()
 
     case = create_case(
         corpus_root=args.corpus_root,
