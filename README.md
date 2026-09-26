@@ -10,7 +10,7 @@ The current branch implements an end-to-end image ingestion path:
 
 1. an allowlisted Telegram user sends a receipt photo or image file
 2. SpendLens stores the exact bytes it received in immutable content-addressed storage
-3. a local Ollama vision model extracts a strict `ReceiptExtraction` object
+3. specialized local OCR models read the receipt, then a local text model structures it
 4. deterministic code checks critical fields and likely duplicates
 5. clean receipts are auto-saved
 6. uncertain receipts enter a Telegram review flow
@@ -45,19 +45,57 @@ Source filenames are derived from SHA-256 hashes. SQLite stores the relative pat
 
 Derived processing images are not retained. They can be regenerated from the source.
 
-## Local model
+## Local extraction cascade
 
-The default configuration uses Ollama with `qwen3-vl:4b`.
+SpendLens now separates OCR from receipt structuring.
 
-Install Ollama separately, then pull the model:
+The default Apple Silicon path is:
 
-```bash
-ollama pull qwen3-vl:4b
-```
+1. PaddleOCR-VL-1.6 4-bit through MLX for primary OCR
+2. Qwen3 4B Instruct through Ollama to turn OCR evidence into the strict receipt schema
+3. dots.ocr 4-bit through MLX as a second local OCR attempt when the first result fails deterministic validation
+4. optional Gemini 3.8 Flash fallback, disabled by default
 
-SpendLens uses Ollama's local `/api/chat` endpoint with a JSON schema generated directly from the Pydantic receipt model.
+This avoids asking a small general vision model to solve OCR and schema generation in one step.
 
-The model can be changed in `.env` without changing the database schema.
+Install the local MLX runtime and development dependencies:
+
+~~~
+python -m pip install -e ".[dev,mac]"
+ollama pull qwen3:4b-instruct
+~~~
+
+The MLX models download from Hugging Face on first use. The defaults are:
+
+~~~
+LOCAL_OCR_PRIMARY_MODEL=mlx-community/PaddleOCR-VL-1.6-4bit
+LOCAL_OCR_SECONDARY_ENABLED=true
+LOCAL_OCR_SECONDARY_MODEL=mlx-community/dots.ocr-4bit
+OLLAMA_STRUCTURER_MODEL=qwen3:4b-instruct
+~~~
+
+Every structured attempt is stored in SQLite. The bot can show the attempt history with /extractions.
+
+### Optional Gemini fallback
+
+Cloud fallback is off unless explicitly enabled:
+
+~~~
+CLOUD_FALLBACK_ENABLED=false
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_FALLBACK_MODE=ocr_text
+~~~
+
+Install the optional Google SDK with:
+
+~~~
+python -m pip install -e ".[gemini]"
+~~~
+
+The privacy-first mode is ocr_text. In that mode, Gemini receives only locally extracted OCR text, not the receipt image. Set GEMINI_FALLBACK_MODE=image only if you explicitly want the original receipt image sent to Google when local extraction fails.
+
+As of September 2026, Google's Gemini API pricing documentation says free-tier content may be used to improve Google products, while paid-tier content is not used for that purpose. For financial receipts, paid API usage is the safer cloud option.
 
 ## Local development
 
@@ -66,7 +104,7 @@ Requires Python 3.11 or newer.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,mac]"
 cp .env.example .env
 ```
 
