@@ -118,6 +118,32 @@ To discard the structured record while retaining the source evidence:
 /discard 12
 ```
 
+## Telegram inspection commands
+
+Routine inspection is available directly through the authorized Telegram bot. You do not need to open SQLite for normal checks.
+
+```
+/status
+/last
+/recent
+/extractions
+/reviews
+/receipt 12
+/source 7
+/help
+```
+
+- `/status` shows source, ingestion, extraction, saved-receipt, and open-review counts plus the configured model.
+- `/last` traces the newest upload from stored source through AI extraction, validation, saved receipt, or review state.
+- `/recent [n]` shows recent canonical receipts. The default is 10 and the maximum is 20.
+- `/extractions [n]` shows recent AI extraction attempts, including parse/provider failures.
+- `/reviews` shows open review sessions for the authorized Telegram user.
+- `/receipt [id]` shows canonical receipt details and extracted line items. Without an ID it shows the latest receipt.
+- `/source [id]` sends the exact stored source back as a Telegram document. Without an ID it sends the latest source. It is sent as a document to avoid an additional photo-compression pass.
+- `/help` shows the command list.
+
+All inspection commands use the same numeric Telegram user allowlist as receipt ingestion.
+
 ## Duplicate protection
 
 SpendLens currently has two layers:

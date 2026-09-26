@@ -35,6 +35,7 @@ from spendlens.extraction import (
     ExtractionProviderError,
     OllamaVisionExtractor,
 )
+from spendlens.inspection_handlers import register_inspection_handlers
 from spendlens.models import ReceiptExtraction
 from spendlens.review import apply_correction, format_review
 from spendlens.storage import store_source_bytes
@@ -85,7 +86,8 @@ async def start_handler(
     if message is not None:
         await message.reply_text(
             "SpendLens is running. Send a receipt photo or image file. "
-            "PDFs are preserved now, but PDF extraction is not enabled yet."
+            "PDFs are preserved now, but PDF extraction is not enabled yet. "
+            "Use /last to inspect the latest upload or /help for commands."
         )
 
 
@@ -566,6 +568,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("accept", accept_handler))
     application.add_handler(CommandHandler("discard", discard_handler))
+    register_inspection_handlers(application)
     application.add_handler(
         MessageHandler(
             filters.PHOTO | filters.Document.ALL,
