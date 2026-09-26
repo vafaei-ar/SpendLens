@@ -631,12 +631,30 @@ def build_application(settings: Settings) -> Application:
     return application
 
 
-def main() -> None:
+def _configure_logging(secret: str) -> None:
+    class SecretFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            message = record.getMessage()
+            if secret and secret in message:
+                record.msg = message.replace(secret, "<redacted>")
+                record.args = ()
+            return True
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    root = logging.getLogger()
+    for handler in root.handlers:
+        handler.addFilter(SecretFilter())
+
+
+def main() -> None:
     settings = Settings()
+    _configure_logging(settings.telegram_bot_token.get_secret_value())
     application = build_application(settings)
     application.run_polling(drop_pending_updates=False)
 
