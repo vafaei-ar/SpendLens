@@ -39,6 +39,7 @@ from spendlens.validation import VALIDATOR_VERSION, validate_receipt
 
 LOGGER = logging.getLogger("spendlens.bot")
 SCHEMA_VERSION = "1"
+MAX_CONCURRENT_UPDATES = 8
 
 BOT_COMMANDS = [
     BotCommand("start", "Start SpendLens and show a quick introduction"),
@@ -112,6 +113,55 @@ async def start_handler(
 
 
 async def receipt_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if not _is_authorized(update, settings):
+        return
+
+    message = update.effective_message
+    if message is None:
+        return
+
+    supported = bool(message.photo)
+    declared_size: int | None = None
+    if message.photo:
+        declared_size = message.photo[-1].file_size
+    elif message.document:
+        mime_type = message.document.mime_type or "application/octet-stream"
+        supported = (
+            mime_type.startswith("image/")
+            or mime_type == "application/pdf"
+        )
+        declared_size = message.document.file_size
+
+    lock: asyncio.Lock = context.application.bot_data[
+        "receipt_processing_lock"
+    ]
+
+    if (
+        supported
+        and (
+            declared_size is None
+            or declared_size <= settings.max_source_bytes
+        )
+    ):
+        if lock.locked():
+            await message.reply_text(
+                "📥 Receipt received and queued. "
+                "Another receipt is being processed."
+            )
+        else:
+            await message.reply_text(
+                "📥 Receipt received. Processing locally…"
+            )
+
+    async with lock:
+        await _receipt_handler_serial(update, context)
+
+
+async def _receipt_handler_serial(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
@@ -605,12 +655,14 @@ def build_application(settings: Settings) -> Application:
     application = (
         Application.builder()
         .token(settings.telegram_bot_token.get_secret_value())
+        .concurrent_updates(MAX_CONCURRENT_UPDATES)
         .post_init(configure_bot_commands)
         .build()
     )
     application.bot_data["settings"] = settings
     application.bot_data["database_path"] = database_path
     application.bot_data["pipeline"] = pipeline
+    application.bot_data["receipt_processing_lock"] = asyncio.Lock()
 
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("accept", accept_handler))
