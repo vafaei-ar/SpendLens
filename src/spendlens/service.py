@@ -1,11 +1,11 @@
 import argparse
+from collections.abc import Sequence
 import os
 import plistlib
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Sequence
 
 
 SERVICE_LABEL = "com.spendlens.bot"
