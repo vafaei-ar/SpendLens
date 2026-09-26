@@ -14,7 +14,6 @@ from spendlens.extraction import (
 from spendlens.models import ReceiptExtraction
 from spendlens.validation import ValidationReport, validate_receipt
 
-
 AttemptStatus = Literal["parsed", "invalid_schema", "provider_error"]
 
 
