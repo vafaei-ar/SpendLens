@@ -29,14 +29,10 @@ from spendlens.db import (
     source_receipt_id,
     update_review_session,
 )
-from spendlens.extraction import (
-    PROMPT_VERSION,
-    ExtractionParseError,
-    ExtractionProviderError,
-    OllamaVisionExtractor,
-)
 from spendlens.inspection_handlers import register_inspection_handlers
 from spendlens.models import ReceiptExtraction
+from spendlens.pipeline import ReceiptExtractionPipeline
+from spendlens.pipeline_factory import build_receipt_pipeline
 from spendlens.review import apply_correction, format_review
 from spendlens.storage import store_source_bytes
 from spendlens.validation import VALIDATOR_VERSION, validate_receipt
@@ -51,12 +47,6 @@ def _is_authorized(update: Update, settings: Settings) -> bool:
         user is not None
         and user.id in settings.telegram_allowed_user_ids
     )
-
-
-def _extractor_metadata(
-    extractor: OllamaVisionExtractor,
-) -> tuple[str, str]:
-    return "ollama", extractor.model
 
 
 def _saved_summary(
@@ -207,84 +197,108 @@ async def receipt_handler(
         )
         return
 
-    extractor: OllamaVisionExtractor = context.application.bot_data[
-        "extractor"
+    pipeline: ReceiptExtractionPipeline = context.application.bot_data[
+        "pipeline"
     ]
-    provider, model_id = _extractor_metadata(extractor)
+    cascade = await asyncio.to_thread(
+        pipeline.run,
+        payload,
+        mime_type=mime_type,
+    )
 
-    try:
-        result = await asyncio.to_thread(
-            extractor.extract,
-            payload,
-            mime_type=mime_type,
-        )
-    except ExtractionParseError as exc:
+    if cascade.chosen_attempt is None:
         with connect(database_path) as connection:
-            record_extraction_attempt(
-                connection,
-                source_document_id=source_document_id,
-                provider=provider,
-                model_id=model_id,
-                prompt_version=PROMPT_VERSION,
-                schema_version=SCHEMA_VERSION,
-                validator_version=VALIDATOR_VERSION,
-                status="invalid_schema",
-                raw_response=exc.raw_response,
-                parsed_json=None,
-                validation_json=None,
-                error_text=str(exc),
-                auto_accepted=False,
-            )
+            for attempt in cascade.attempts:
+                record_extraction_attempt(
+                    connection,
+                    source_document_id=source_document_id,
+                    provider=attempt.provider,
+                    model_id=attempt.model_id,
+                    prompt_version=attempt.prompt_version,
+                    schema_version=(
+                        attempt.extraction.schema_version
+                        if attempt.extraction is not None
+                        else SCHEMA_VERSION
+                    ),
+                    validator_version=VALIDATOR_VERSION,
+                    status=attempt.status,
+                    raw_response=attempt.raw_response,
+                    parsed_json=(
+                        attempt.extraction.model_dump_json()
+                        if attempt.extraction is not None
+                        else None
+                    ),
+                    validation_json=(
+                        attempt.validation.model_dump_json()
+                        if attempt.validation is not None
+                        else None
+                    ),
+                    error_text=attempt.error_text,
+                    auto_accepted=False,
+                )
         await message.reply_text(
-            "Source preserved, but the model returned invalid structured "
-            "data. No receipt was saved."
-        )
-        return
-    except ExtractionProviderError as exc:
-        with connect(database_path) as connection:
-            record_extraction_attempt(
-                connection,
-                source_document_id=source_document_id,
-                provider=provider,
-                model_id=model_id,
-                prompt_version=PROMPT_VERSION,
-                schema_version=SCHEMA_VERSION,
-                validator_version=VALIDATOR_VERSION,
-                status="provider_error",
-                raw_response=None,
-                parsed_json=None,
-                validation_json=None,
-                error_text=str(exc),
-                auto_accepted=False,
-            )
-        await message.reply_text(
-            "Source preserved, but local extraction failed. "
-            "No receipt was saved."
+            "Source preserved, but the configured extraction cascade "
+            "could not produce usable structured data. "
+            "Use /extractions to inspect each attempt."
         )
         return
 
-    extraction = result.extraction
+    chosen = cascade.chosen_attempt
+    extraction = chosen.extraction
+    if extraction is None:
+        raise RuntimeError("Chosen extraction attempt has no receipt data")
+
     with connect(database_path) as connection:
         duplicates = find_possible_duplicates(connection, extraction)
         report = validate_receipt(
             extraction,
             possible_duplicate=bool(duplicates),
         )
-        attempt_id = record_extraction_attempt(
-            connection,
-            source_document_id=source_document_id,
-            provider=result.provider,
-            model_id=result.model_id,
-            prompt_version=result.prompt_version,
-            schema_version=extraction.schema_version,
-            validator_version=VALIDATOR_VERSION,
-            status="parsed",
-            raw_response=result.raw_response,
-            parsed_json=extraction.model_dump_json(),
-            validation_json=report.model_dump_json(),
-            error_text=None,
-            auto_accepted=report.auto_accept,
-        )
+
+        attempt_ids: list[int] = []
+        for index, attempt in enumerate(cascade.attempts):
+            attempt_report = (
+                report
+                if index == cascade.chosen_index
+                else attempt.validation
+            )
+            attempt_ids.append(
+                record_extraction_attempt(
+                    connection,
+                    source_document_id=source_document_id,
+                    provider=attempt.provider,
+                    model_id=attempt.model_id,
+                    prompt_version=attempt.prompt_version,
+                    schema_version=(
+                        attempt.extraction.schema_version
+                        if attempt.extraction is not None
+                        else SCHEMA_VERSION
+                    ),
+                    validator_version=VALIDATOR_VERSION,
+                    status=attempt.status,
+                    raw_response=attempt.raw_response,
+                    parsed_json=(
+                        attempt.extraction.model_dump_json()
+                        if attempt.extraction is not None
+                        else None
+                    ),
+                    validation_json=(
+                        attempt_report.model_dump_json()
+                        if attempt_report is not None
+                        else None
+                    ),
+                    error_text=attempt.error_text,
+                    auto_accepted=(
+                        attempt_report.auto_accept
+                        if attempt_report is not None
+                        else False
+                    ),
+                )
+            )
+
+        if cascade.chosen_index is None:
+            raise RuntimeError("Chosen extraction index is missing")
+        chosen_attempt_id = attempt_ids[cascade.chosen_index]
 
         if report.auto_accept:
             receipt_id = persist_receipt(
@@ -296,20 +310,26 @@ async def receipt_handler(
             )
             link_extraction_to_receipt(
                 connection,
-                extraction_attempt_id=attempt_id,
+                extraction_attempt_id=chosen_attempt_id,
                 receipt_id=receipt_id,
             )
         else:
             receipt_id = None
             review_id = create_review_session(
                 connection,
-                extraction_attempt_id=attempt_id,
+                extraction_attempt_id=chosen_attempt_id,
                 source_document_id=source_document_id,
                 telegram_chat_id=message.chat_id,
                 telegram_user_id=user.id,
                 proposed_json=extraction.model_dump_json(),
                 validation_json=report.model_dump_json(),
             )
+
+    if cascade.used_cloud:
+        mode = settings.gemini_fallback_mode.replace("_", " ")
+        await message.reply_text(
+            f"Cloud fallback used: {settings.gemini_model} ({mode})."
+        )
 
     if receipt_id is not None:
         await message.reply_text(
@@ -551,11 +571,7 @@ async def discard_handler(
 
 def build_application(settings: Settings) -> Application:
     database_path = initialize_database(settings.data_dir)
-    extractor = OllamaVisionExtractor(
-        base_url=settings.ollama_base_url,
-        model=settings.ollama_model,
-        timeout_seconds=settings.ollama_timeout_seconds,
-    )
+    pipeline = build_receipt_pipeline(settings)
     application = (
         Application.builder()
         .token(settings.telegram_bot_token.get_secret_value())
@@ -563,7 +579,7 @@ def build_application(settings: Settings) -> Application:
     )
     application.bot_data["settings"] = settings
     application.bot_data["database_path"] = database_path
-    application.bot_data["extractor"] = extractor
+    application.bot_data["pipeline"] = pipeline
 
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("accept", accept_handler))

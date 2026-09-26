@@ -95,10 +95,11 @@ async def status_handler(
     with connect(database_path) as connection:
         counts = get_counts(connection)
 
+    pipeline = context.application.bot_data["pipeline"]
     await message.reply_text(
         format_status(
             counts,
-            model_id=settings.ollama_model,
+            model_id=pipeline.description,
             extraction_enabled=settings.extraction_enabled,
         )
     )

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spendlens"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local-first receipt capture and spending analysis"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pre-commit>=3.8,<5", "pytest>=8.3,<9", "ruff>=0.6,<1"]
+mac = ["mlx-vlm>=0.3.12"]
+gemini = ["google-genai>=1.0"]
+full = ["mlx-vlm>=0.3.12", "google-genai>=1.0"]
 
 [project.scripts]
 spendlens-bot = "spendlens.bot:main"

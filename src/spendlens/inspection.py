@@ -331,7 +331,7 @@ def format_status(
         f"Saved receipts: {counts.receipts}\n"
         f"Open reviews: {counts.open_reviews}\n"
         f"Extraction: {state}\n"
-        f"Model: {model_id}"
+        f"Pipeline: {model_id}"
     )
 
 
@@ -436,7 +436,8 @@ def format_extractions(rows: list[dict[str, Any]]) -> str:
         auto_text = "auto" if int(row["auto_accepted"]) else "review"
         lines.append(
             f"#{row['id']} · source #{row['source_document_id']} · "
-            f"{row['status']} · {auto_text} · {row['model_id']}{summary}"
+            f"{row['status']} · {auto_text} · {row['provider']} · "
+            f"{row['model_id']}{summary}"
         )
     return "\n".join(lines)
 
