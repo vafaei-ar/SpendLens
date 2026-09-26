@@ -21,7 +21,6 @@ from spendlens.inspection import (
     recent_receipts,
 )
 
-
 _HELP_TEXT = """SpendLens commands
 
 /status - database and model status
