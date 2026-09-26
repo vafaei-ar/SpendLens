@@ -62,3 +62,60 @@ def test_generated_plist_is_serializable(tmp_path: Path) -> None:
 
     assert decoded["Label"] == SERVICE_LABEL
     assert decoded["KeepAlive"] is True
+
+
+
+def test_service_log_redacts_telegram_bot_token() -> None:
+    from spendlens.service import _redact_log_line
+
+    line = (
+        "POST https://api.telegram.org/"
+        "bot123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdef123456/getUpdates"
+    )
+    redacted = _redact_log_line(line)
+
+    assert "123456789:" not in redacted
+    assert "ABCDEFGHIJKLMNOPQRSTUVWXYZ" not in redacted
+    assert "bot<redacted>/getUpdates" in redacted
+
+
+def test_restart_uses_kickstart_when_loaded(monkeypatch) -> None:
+    import spendlens.service as service
+
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(service, "_require_macos", lambda: None)
+    monkeypatch.setattr(
+        service,
+        "launch_agent_path",
+        lambda: Path("/tmp/com.spendlens.bot.plist"),
+    )
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(service, "_is_loaded", lambda: True)
+    monkeypatch.setattr(
+        service,
+        "_target",
+        lambda uid=None: "gui/501/com.spendlens.bot",
+    )
+
+    def fake_run(args, *, check=True):
+        calls.append(list(args))
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return Result()
+
+    monkeypatch.setattr(service, "_run", fake_run)
+
+    message = service.restart()
+
+    assert message == "SpendLens service restarted."
+    assert calls == [
+        [
+            "launchctl",
+            "kickstart",
+            "-k",
+            "gui/501/com.spendlens.bot",
+        ]
+    ]
