@@ -4,11 +4,13 @@ import plistlib
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
 SERVICE_LABEL = "com.spendlens.bot"
 PLIST_FILENAME = f"{SERVICE_LABEL}.plist"
+_TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]{20,}")
 
 
 class ServiceError(RuntimeError):
@@ -106,6 +108,16 @@ def _bootout() -> None:
     )
 
 
+def _wait_until_unloaded(timeout_seconds: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while _is_loaded() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if _is_loaded():
+        raise ServiceError(
+            "Timed out waiting for launchd to unload SpendLens."
+        )
+
+
 def install(
     *,
     project_dir: Path,
@@ -135,6 +147,7 @@ def install(
 
     if _is_loaded():
         _bootout()
+        _wait_until_unloaded()
 
     plist_path.write_bytes(
         plistlib.dumps(payload, fmt=plistlib.FMT_XML)
@@ -187,9 +200,11 @@ def restart() -> str:
         )
 
     if _is_loaded():
-        _bootout()
+        _run(["launchctl", "kickstart", "-k", _target()])
+        return "SpendLens service restarted."
+
     _bootstrap(plist_path)
-    return "SpendLens service restarted."
+    return "SpendLens service started."
 
 
 def uninstall() -> str:
@@ -242,6 +257,10 @@ def status() -> str:
     )
 
 
+def _redact_log_line(line: str) -> str:
+    return _TELEGRAM_TOKEN_RE.sub("bot<redacted>", line)
+
+
 def _tail(path: Path, lines: int) -> list[str]:
     if not path.exists():
         return ["(no log file yet)"]
@@ -249,7 +268,7 @@ def _tail(path: Path, lines: int) -> list[str]:
         encoding="utf-8",
         errors="replace",
     ).splitlines()
-    return content[-lines:]
+    return [_redact_log_line(line) for line in content[-lines:]]
 
 
 def logs(lines: int = 80) -> str:
