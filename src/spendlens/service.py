@@ -7,7 +7,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-
 SERVICE_LABEL = "com.spendlens.bot"
 PLIST_FILENAME = f"{SERVICE_LABEL}.plist"
 
