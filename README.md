@@ -148,6 +148,8 @@ spendlens-service uninstall
 
 The service uses `KeepAlive`, so launchd restarts it if it crashes. `stop` unloads the LaunchAgent so it stays stopped until `start` or `restart`.
 
+Telegram commands remain responsive while OCR is running. Receipt processing is serialized so only one local OCR job uses the MLX models at a time; additional receipts are queued and acknowledged immediately.
+
 If you change Python environments or move the repository, run `spendlens-service install` again from the new environment/location.
 
 ## Review flow
