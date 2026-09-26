@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from spendlens.models import ReceiptExtraction
 
-
 PROMPT_VERSION = "receipt-v1"
 TEXT_PROMPT_VERSION = "receipt-text-v1"
 GEMINI_PROMPT_VERSION = "receipt-gemini-v1"
