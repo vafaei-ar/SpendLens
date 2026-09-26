@@ -92,6 +92,11 @@ def test_restart_uses_kickstart_when_loaded(monkeypatch) -> None:
     )
     monkeypatch.setattr(Path, "exists", lambda self: True)
     monkeypatch.setattr(service, "_is_loaded", lambda: True)
+    monkeypatch.setattr(
+        service,
+        "_target",
+        lambda uid=None: "gui/501/com.spendlens.bot",
+    )
 
     def fake_run(args, *, check=True):
         calls.append(list(args))
