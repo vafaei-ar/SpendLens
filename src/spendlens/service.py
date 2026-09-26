@@ -1,10 +1,10 @@
 import argparse
-from collections.abc import Sequence
 import os
 import plistlib
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 
