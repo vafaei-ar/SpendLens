@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from telegram import Update
+from telegram import BotCommand, BotCommandScopeChat, MenuButtonCommands, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -39,6 +39,36 @@ from spendlens.validation import VALIDATOR_VERSION, validate_receipt
 
 LOGGER = logging.getLogger("spendlens.bot")
 SCHEMA_VERSION = "1"
+
+BOT_COMMANDS = [
+    BotCommand("start", "Start SpendLens and show a quick introduction"),
+    BotCommand("help", "Show available commands"),
+    BotCommand("status", "Show database and extraction pipeline status"),
+    BotCommand("last", "Inspect the latest receipt upload end to end"),
+    BotCommand("recent", "Show recent saved receipts"),
+    BotCommand("extractions", "Show recent AI/OCR extraction attempts"),
+    BotCommand("reviews", "Show receipts waiting for review"),
+    BotCommand("receipt", "Show a saved receipt, optionally by ID"),
+    BotCommand("source", "Send the exact stored source, optionally by ID"),
+    BotCommand("accept", "Accept a reviewed receipt by review ID"),
+    BotCommand("discard", "Discard reviewed data but keep source evidence"),
+]
+
+
+async def configure_bot_commands(application: Application) -> None:
+    settings: Settings = application.bot_data["settings"]
+
+    for user_id in settings.telegram_allowed_user_ids:
+        scope = BotCommandScopeChat(chat_id=user_id)
+        await application.bot.set_my_commands(
+            BOT_COMMANDS,
+            scope=scope,
+        )
+        await application.bot.set_chat_menu_button(
+            chat_id=user_id,
+            menu_button=MenuButtonCommands(),
+        )
+
 
 
 def _is_authorized(update: Update, settings: Settings) -> bool:
@@ -575,6 +605,7 @@ def build_application(settings: Settings) -> Application:
     application = (
         Application.builder()
         .token(settings.telegram_bot_token.get_secret_value())
+        .post_init(configure_bot_commands)
         .build()
     )
     application.bot_data["settings"] = settings

@@ -179,6 +179,7 @@ Routine inspection is available directly through the authorized Telegram bot. Yo
 - `/receipt [id]` shows canonical receipt details and extracted line items. Without an ID it shows the latest receipt.
 - `/source [id]` sends the exact stored source back as a Telegram document. Without an ID it sends the latest source. It is sent as a document to avoid an additional photo-compression pass.
 - `/help` shows the command list.
+- SpendLens registers these commands with Telegram on startup, so they appear in the bot's command/menu button for authorized users.
 
 All inspection commands use the same numeric Telegram user allowlist as receipt ingestion.
 
