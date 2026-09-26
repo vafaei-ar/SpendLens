@@ -121,6 +121,35 @@ spendlens-bot
 
 The bot uses long polling. Unauthorized numeric Telegram user IDs are ignored.
 
+## Run SpendLens as a macOS service
+
+On macOS, SpendLens can run as a user LaunchAgent under launchd. After the one-time install, it no longer depends on an open Terminal window and starts automatically when you log in.
+
+From the SpendLens repository:
+
+```bash
+python -m pip install -e ".[dev,mac]"
+spendlens-service install
+```
+
+The installer records the exact Python executable and project directory you used, reads secrets from the existing project `.env`, writes a LaunchAgent to `~/Library/LaunchAgents/com.spendlens.bot.plist`, and stores service logs under `~/Library/Logs/SpendLens/`.
+
+Management commands:
+
+```bash
+spendlens-service status
+spendlens-service start
+spendlens-service stop
+spendlens-service restart
+spendlens-service logs
+spendlens-service logs -n 200
+spendlens-service uninstall
+```
+
+The service uses `KeepAlive`, so launchd restarts it if it crashes. `stop` unloads the LaunchAgent so it stays stopped until `start` or `restart`.
+
+If you change Python environments or move the repository, run `spendlens-service install` again from the new environment/location.
+
 ## Review flow
 
 A valid high-confidence-by-rules receipt requires no tap.

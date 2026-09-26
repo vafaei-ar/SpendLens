@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spendlens"
-version = "0.5.1"
+version = "0.6.0"
 description = "Local-first receipt capture and spending analysis"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ full = ["mlx-vlm>=0.3.12", "google-genai>=1.0"]
 
 [project.scripts]
 spendlens-bot = "spendlens.bot:main"
+spendlens-service = "spendlens.service:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spendlens"]
