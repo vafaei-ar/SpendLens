@@ -1,6 +1,5 @@
-from types import SimpleNamespace
-
 import asyncio
+from types import SimpleNamespace
 
 from spendlens.bot import BOT_COMMANDS, configure_bot_commands
 
