@@ -26,7 +26,7 @@ def _context(lock: asyncio.Lock):
                     max_source_bytes=1024 * 1024,
                 ),
                 "receipt_processing_lock": lock,
-            )
+            }
         )
     )
 
