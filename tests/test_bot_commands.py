@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import pytest
+import asyncio
 
 from spendlens.bot import BOT_COMMANDS, configure_bot_commands
 
@@ -22,8 +22,7 @@ class FakeBot:
         self.menu_calls.append(chat_id)
 
 
-@pytest.mark.asyncio
-async def test_configure_bot_commands_for_allowed_users() -> None:
+def test_configure_bot_commands_for_allowed_users() -> None:
     bot = FakeBot()
     application = SimpleNamespace(
         bot=bot,
@@ -34,7 +33,7 @@ async def test_configure_bot_commands_for_allowed_users() -> None:
         },
     )
 
-    await configure_bot_commands(application)
+    asyncio.run(configure_bot_commands(application))
 
     assert {chat_id for chat_id, _ in bot.command_calls} == {123, 456}
     assert set(bot.menu_calls) == {123, 456}
