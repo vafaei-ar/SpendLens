@@ -30,8 +30,7 @@ Rules:
 - refunds/returns use transaction_type refund/return and negative totals
 - currency: ISO 4217 three-letter code when supported by evidence
 - extract EVERY readable purchased item, not just a sample
-- do not put subtotal, tax, tender/payment, change, loyalty balances, or receipt metadata in line_items
-- description_raw should preserve the printed receipt description
+- do not put subtotal, tax, tender/payment, change, loyalty balances,\n  or receipt metadata in line_items\n- description_raw should preserve the printed receipt description
 - sku should preserve a printed item/product code when visible
 - description_normalized should be a concise human-readable product name
 - brand should be set only when supported by the receipt
@@ -39,8 +38,7 @@ Rules:
 - line-item discount is a positive amount; amount is the final charged line amount
 - category should describe the broad purchase type
 - subcategory should be as specific as the schema allows, for example fruit or meat_seafood
-- preserve uncertain cryptic descriptions in description_raw rather than inventing a product identity
-"""
+- preserve uncertain cryptic descriptions in description_raw rather than\n  inventing a product identity\n"""
 
 _RECEIPT_IMAGE_PROMPT = (
     "Extract structured data from this purchase receipt image.\n\n"
