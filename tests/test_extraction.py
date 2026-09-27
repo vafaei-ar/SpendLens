@@ -97,7 +97,26 @@ class FakeInteractions:
     def create(self, **kwargs):
         self.calls.append(kwargs)
         if "response_format" in kwargs:
-            return FakeInteraction(json.dumps(valid_model_payload()))
+            schema = kwargs["response_format"]["schema"]
+            properties = schema.get("properties", {})
+            if "merchant" in properties:
+                return FakeInteraction(json.dumps(valid_model_payload()))
+            return FakeInteraction(
+                json.dumps(
+                    {
+                        "item_count": 1,
+                        "line_items": [
+                            {
+                                "description_raw": "APPLE",
+                                "description_normalized": "Apple",
+                                "amount": "10.00",
+                                "category": "groceries",
+                                "subcategory": "fruit",
+                            }
+                        ],
+                    }
+                )
+            )
         return FakeInteraction(
             "EXAMPLE MARKET\nAPPLE 10.00\n"
             "SUBTOTAL 10.00\nTAX 0.60\nTOTAL 10.60"
@@ -155,3 +174,29 @@ def test_gemini_structuring_uses_json_schema_object(
     assert response_format["mime_type"] == "application/json"
     assert isinstance(response_format["schema"], dict)
     assert str(result.extraction.total) == "10.60"
+
+
+
+def test_gemini_line_item_pass_uses_dedicated_schema(
+    monkeypatch,
+) -> None:
+    extractor = GeminiReceiptExtractor(
+        api_key="test-key",
+        model="gemini-test",
+    )
+    client = FakeGeminiClient()
+    monkeypatch.setattr(extractor, "_client", lambda: client)
+
+    result = extractor.extract_items_from_text(
+        "APPLE 10.00\n# ITEMS SOLD 1"
+    )
+
+    call = client.interactions.calls[0]
+    response_format = call["response_format"]
+    schema = response_format["schema"]
+    assert "line_items" in schema["properties"]
+    assert "item_count" in schema["properties"]
+    assert "merchant" not in schema["properties"]
+    assert result.extraction.item_count == 1
+    assert len(result.extraction.line_items) == 1
+    assert result.extraction.line_items[0].subcategory.value == "fruit"
