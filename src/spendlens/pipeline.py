@@ -63,7 +63,7 @@ class PipelineResult:
 
 
 class ReceiptExtractionPipeline:
-    """Gemini-first receipt extraction with optional local fallback."""
+    """Gemini two-pass receipt reading with optional local fallback."""
 
     def __init__(
         self,
@@ -86,16 +86,19 @@ class ReceiptExtractionPipeline:
 
     @property
     def description(self) -> str:
-        base = f"{self.gemini.model} (Gemini image API)"
+        base = (
+            f"{self.gemini.model} "
+            "(Gemini ultra-high transcript -> structured extraction)"
+        )
         if not self.local_fallback_enabled:
-            return f"{base} -> local fallback off"
+            return f"{base} -> direct Gemini retry -> local fallback off"
 
         local_models = " -> ".join(
             extractor.model for extractor in self.ocr_extractors
         )
         if local_models and self.structurer is not None:
             return (
-                f"{base} -> {local_models} -> "
+                f"{base} -> direct Gemini retry -> {local_models} -> "
                 f"{self.structurer.model} (local fallback)"
             )
         return f"{base} -> local fallback enabled but not configured"
@@ -110,7 +113,73 @@ class ReceiptExtractionPipeline:
             default_currency=self.default_currency,
         )
 
-    def _gemini_attempt(
+    def _gemini_two_pass_attempt(
+        self,
+        *,
+        image_bytes: bytes,
+        mime_type: str,
+    ) -> PipelineAttempt:
+        transcript: OCRResult | None = None
+        try:
+            transcript = self.gemini.transcribe_image(
+                image_bytes,
+                mime_type=mime_type,
+            )
+            result = self.gemini.extract_from_text(transcript.text)
+        except ExtractionParseError as exc:
+            return PipelineAttempt(
+                provider="gemini-vision-ocr+gemini-structure",
+                model_id=f"{self.gemini.model} -> {self.gemini.model}",
+                prompt_version="receipt-gemini-two-pass-v1",
+                status="invalid_schema",
+                raw_response=evidence_envelope(
+                    ocr=transcript,
+                    structured_response=exc.raw_response,
+                ),
+                extraction=None,
+                validation=None,
+                error_text=str(exc),
+                cloud=True,
+            )
+        except ExtractionProviderError as exc:
+            return PipelineAttempt(
+                provider="gemini-vision-ocr+gemini-structure",
+                model_id=f"{self.gemini.model} -> {self.gemini.model}",
+                prompt_version="receipt-gemini-two-pass-v1",
+                status="provider_error",
+                raw_response=evidence_envelope(
+                    ocr=transcript,
+                    structured_response=None,
+                ),
+                extraction=None,
+                validation=None,
+                error_text=str(exc),
+                cloud=True,
+            )
+
+        extraction, recovered_fields = recover_receipt_fields(
+            result.extraction,
+            ocr_text=transcript.text,
+            default_currency=self.default_currency,
+        )
+        report = validate_receipt(extraction)
+        return PipelineAttempt(
+            provider="gemini-vision-ocr+gemini-structure",
+            model_id=f"{transcript.model_id} -> {result.model_id}",
+            prompt_version="receipt-gemini-two-pass-v1",
+            status="parsed",
+            raw_response=evidence_envelope(
+                ocr=transcript,
+                structured_response=result.raw_response,
+                recovered_fields=recovered_fields,
+            ),
+            extraction=extraction,
+            validation=report,
+            error_text=None,
+            cloud=True,
+        )
+
+    def _gemini_direct_attempt(
         self,
         *,
         image_bytes: bytes,
@@ -123,9 +192,9 @@ class ReceiptExtractionPipeline:
             )
         except ExtractionParseError as exc:
             return PipelineAttempt(
-                provider="gemini",
+                provider="gemini-direct",
                 model_id=self.gemini.model,
-                prompt_version="receipt-gemini-v1",
+                prompt_version="receipt-gemini-direct-v1",
                 status="invalid_schema",
                 raw_response=exc.raw_response,
                 extraction=None,
@@ -135,9 +204,9 @@ class ReceiptExtractionPipeline:
             )
         except ExtractionProviderError as exc:
             return PipelineAttempt(
-                provider="gemini",
+                provider="gemini-direct",
                 model_id=self.gemini.model,
-                prompt_version="receipt-gemini-v1",
+                prompt_version="receipt-gemini-direct-v1",
                 status="provider_error",
                 raw_response=None,
                 extraction=None,
@@ -150,17 +219,16 @@ class ReceiptExtractionPipeline:
             result.extraction
         )
         report = validate_receipt(extraction)
-        envelope = evidence_envelope(
-            ocr=None,
-            structured_response=result.raw_response,
-            recovered_fields=recovered_fields,
-        )
         return PipelineAttempt(
-            provider=result.provider,
+            provider="gemini-direct",
             model_id=result.model_id,
-            prompt_version=result.prompt_version,
+            prompt_version="receipt-gemini-direct-v1",
             status="parsed",
-            raw_response=envelope,
+            raw_response=evidence_envelope(
+                ocr=None,
+                structured_response=result.raw_response,
+                recovered_fields=recovered_fields,
+            ),
             extraction=extraction,
             validation=report,
             error_text=None,
@@ -245,6 +313,20 @@ class ReceiptExtractionPipeline:
             return 999
         return len(attempt.validation.blockers)
 
+    @staticmethod
+    def _line_item_count(attempt: PipelineAttempt) -> int:
+        if attempt.extraction is None:
+            return 0
+        return len(attempt.extraction.line_items)
+
+    @classmethod
+    def _ready_to_stop(cls, attempt: PipelineAttempt) -> bool:
+        return bool(
+            attempt.validation is not None
+            and attempt.validation.auto_accept
+            and cls._line_item_count(attempt) > 0
+        )
+
     def _run_local_fallback(
         self,
         image_bytes: bytes,
@@ -282,10 +364,7 @@ class ReceiptExtractionPipeline:
             index = len(attempts) - 1
             if attempt.status == "parsed":
                 parsed_indexes.append(index)
-                if (
-                    attempt.validation is not None
-                    and attempt.validation.auto_accept
-                ):
+                if self._ready_to_stop(attempt):
                     return PipelineResult(
                         attempts=attempts,
                         chosen_index=index,
@@ -304,10 +383,7 @@ class ReceiptExtractionPipeline:
             index = len(attempts) - 1
             if attempt.status == "parsed":
                 parsed_indexes.append(index)
-                if (
-                    attempt.validation is not None
-                    and attempt.validation.auto_accept
-                ):
+                if self._ready_to_stop(attempt):
                     return PipelineResult(
                         attempts=attempts,
                         chosen_index=index,
@@ -324,20 +400,30 @@ class ReceiptExtractionPipeline:
         attempts: list[PipelineAttempt] = []
         parsed_indexes: list[int] = []
 
-        gemini_attempt = self._gemini_attempt(
+        two_pass = self._gemini_two_pass_attempt(
             image_bytes=image_bytes,
             mime_type=mime_type,
         )
-        attempts.append(gemini_attempt)
-        if gemini_attempt.status == "parsed":
+        attempts.append(two_pass)
+        if two_pass.status == "parsed":
             parsed_indexes.append(0)
-            if (
-                gemini_attempt.validation is not None
-                and gemini_attempt.validation.auto_accept
-            ):
+            if self._ready_to_stop(two_pass):
                 return PipelineResult(
                     attempts=attempts,
                     chosen_index=0,
+                )
+
+        direct = self._gemini_direct_attempt(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+        )
+        attempts.append(direct)
+        if direct.status == "parsed":
+            parsed_indexes.append(1)
+            if self._ready_to_stop(direct):
+                return PipelineResult(
+                    attempts=attempts,
+                    chosen_index=1,
                 )
 
         if self.local_fallback_enabled:
@@ -355,6 +441,7 @@ class ReceiptExtractionPipeline:
                 parsed_indexes,
                 key=lambda index: (
                     self._blocker_count(attempts[index]),
+                    -self._line_item_count(attempts[index]),
                     index,
                 ),
             )
