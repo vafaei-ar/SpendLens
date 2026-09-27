@@ -642,12 +642,21 @@ def evidence_envelope(
     ocr: OCRResult | None,
     structured_response: str | None,
     recovered_fields: list[str] | None = None,
+    item_response: str | None = None,
+    item_error: str | None = None,
 ) -> str | None:
-    if ocr is None and structured_response is None:
+    if (
+        ocr is None
+        and structured_response is None
+        and item_response is None
+        and item_error is None
+    ):
         return None
 
     payload: dict[str, Any] = {
         "structured_response": structured_response,
+        "item_response": item_response,
+        "item_error": item_error,
         "deterministic_recovered_fields": recovered_fields or [],
     }
     if ocr is not None:
