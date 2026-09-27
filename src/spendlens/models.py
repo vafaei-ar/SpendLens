@@ -100,6 +100,24 @@ class LineItem(BaseModel):
         return stripped or None
 
 
+class LineItemsExtraction(BaseModel):
+    """Dedicated schema for exhaustive line-item extraction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Printed item count/items sold when explicitly shown on receipt."
+        ),
+    )
+    line_items: list[LineItem] = Field(
+        default_factory=list,
+        description="Every readable purchased item from the receipt.",
+    )
+
+
 class ReceiptExtraction(BaseModel):
     """Strict extraction contract.
 
@@ -123,6 +141,13 @@ class ReceiptExtraction(BaseModel):
     total: Decimal | None = None
     currency: str | None = None
     transaction_type: TransactionType = TransactionType.PURCHASE
+    item_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Printed item count/items sold when explicitly shown on receipt."
+        ),
+    )
     line_items: list[LineItem] = Field(
         default_factory=list,
         description=(
