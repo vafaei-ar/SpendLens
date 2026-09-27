@@ -42,7 +42,10 @@ def _receipt() -> ReceiptExtraction:
             "line_items": [
                 {
                     "description_raw": "APPLE",
+                    "description_normalized": "Apple",
                     "amount": "10.00",
+                    "category": "groceries",
+                    "subcategory": "fruit",
                 }
             ],
         }
@@ -149,7 +152,8 @@ def test_recent_receipts_and_detail(tmp_path: Path) -> None:
     receipt_text = format_receipt(receipt)
     assert f"Receipt #{receipt_id}" in receipt_text
     assert f"Source #{source_id}" in receipt_text
-    assert "APPLE" in receipt_text
+    assert "Apple" in receipt_text
+    assert "groceries/fruit" in receipt_text
 
     assert source is not None
     assert source["relative_path"].endswith(".jpg")
