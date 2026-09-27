@@ -4,7 +4,6 @@ from decimal import Decimal
 from spendlens.extraction import OCRResult
 from spendlens.models import ReceiptExtraction
 
-
 _AMOUNT_RE = re.compile(
     r"(?<!\d)[+-]?\d[\d,]*\.\d{2}(?!\d)"
 )
