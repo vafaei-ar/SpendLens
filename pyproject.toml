@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spendlens"
-version = "0.6.2"
+version = "0.7.0"
 description = "Local-first receipt capture and spending analysis"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-only" }
 authors = [{ name = "Alireza Vafaei Sadr" }]
 dependencies = [
+  "google-genai>=1.0",
   "httpx>=0.28,<0.29",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.5,<3",
@@ -21,7 +22,7 @@ dependencies = [
 dev = ["pre-commit>=3.8,<5", "pytest>=8.3,<9", "ruff>=0.6,<1"]
 mac = ["mlx-vlm>=0.3.12"]
 gemini = ["google-genai>=1.0"]
-full = ["mlx-vlm>=0.3.12", "google-genai>=1.0"]
+full = ["mlx-vlm>=0.3.12"]
 
 [project.scripts]
 spendlens-bot = "spendlens.bot:main"
