@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from spendlens.models import ReceiptExtraction, TransactionType
 from spendlens.normalize import normalize_merchant
 
-VALIDATOR_VERSION = "validator-v1"
+VALIDATOR_VERSION = "validator-v2"
 
 
 class ValidationIssue(BaseModel):
@@ -148,6 +148,32 @@ def validate_receipt(
             issues,
             "possible_duplicate",
             "A likely duplicate transaction requires review.",
+        )
+
+    purchase_amount = receipt.subtotal or receipt.total
+    if (
+        receipt.transaction_type == TransactionType.PURCHASE
+        and purchase_amount is not None
+        and purchase_amount > 0
+        and not receipt.line_items
+    ):
+        _block(
+            issues,
+            "line_items_missing",
+            "Purchased items are required before automatic acceptance.",
+        )
+
+    if (
+        receipt.item_count is not None
+        and receipt.item_count > len(receipt.line_items)
+    ):
+        _block(
+            issues,
+            "line_items_incomplete",
+            (
+                f"Receipt reports {receipt.item_count} items, but only "
+                f"{len(receipt.line_items)} item lines were extracted."
+            ),
         )
 
     if receipt.line_items and receipt.subtotal is not None:
