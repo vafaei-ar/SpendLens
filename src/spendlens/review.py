@@ -63,21 +63,21 @@ def format_review(
     if not reason_text:
         reason_text = "- Manual verification requested."
 
+    item_text = f"Line items: {len(extraction.line_items)}"
+    if extraction.item_count is not None:
+        item_text += f" / printed count {extraction.item_count}"
+
     return (
         f"⚠️ Review needed #{review_id}\n"
         f"Merchant: {extraction.merchant or 'unknown'}\n"
         f"Date: {extraction.transaction_date or 'unknown'}\n"
-        f"Subtotal: {extraction.subtotal if extraction.subtotal is not None else 'unknown'}\n"
+        f"Subtotal: "
+        f"{extraction.subtotal if extraction.subtotal is not None else 'unknown'}\n"
         f"Tax: {extraction.tax if extraction.tax is not None else 'unknown'}\n"
         f"Total: {extraction.total if extraction.total is not None else 'unknown'}\n"
         f"Currency: {extraction.currency or 'unknown'}\n"
         f"Type: {extraction.transaction_type.value}\n"
-        f"Line items: {len(extraction.line_items)}"
-        + (
-            f" / printed count {extraction.item_count}\n\n"
-            if extraction.item_count is not None
-            else "\n\n"
-        )
+        f"{item_text}\n\n"
         f"Why review is needed:\n{reason_text}\n\n"
         "Reply to this message with a correction such as:\n"
         "total 57.82\n"
