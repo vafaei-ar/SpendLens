@@ -122,9 +122,9 @@ class ReceiptExtraction(BaseModel):
     """Strict extraction contract.
 
     Critical receipt fields may be null when the source cannot support a
-    reliable value. Line items are best-effort but should be exhaustive when
-    readable. The deterministic validator decides whether the receipt itself
-    can be auto-accepted.
+    reliable value. Purchased line items should be exhaustive when readable.
+    The deterministic validator blocks automatic acceptance when purchase
+    items are missing or conflict with an explicit printed item count.
     """
 
     model_config = ConfigDict(extra="forbid")
