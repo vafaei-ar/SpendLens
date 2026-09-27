@@ -114,6 +114,7 @@ def test_rich_line_items_are_persisted_for_later_analytics(tmp_path) -> None:
             "tax": "0.00",
             "total": "6.87",
             "currency": "USD",
+            "item_count": 1,
             "line_items": [
                 {
                     "description_raw": "326086 GOLDKIWI 2LF",
@@ -140,6 +141,10 @@ def test_rich_line_items_are_persisted_for_later_analytics(tmp_path) -> None:
             status="accepted",
             actor="test",
         )
+        receipt_row = connection.execute(
+            "SELECT item_count FROM receipts WHERE id = ?",
+            (receipt_id,),
+        ).fetchone()
         row = connection.execute(
             """
             SELECT
@@ -159,6 +164,8 @@ def test_rich_line_items_are_persisted_for_later_analytics(tmp_path) -> None:
             (receipt_id,),
         ).fetchone()
 
+    assert receipt_row is not None
+    assert receipt_row["item_count"] == 1
     assert row is not None
     assert row["sku"] == "326086"
     assert row["description_raw"] == "326086 GOLDKIWI 2LF"
@@ -201,3 +208,13 @@ def test_initialize_database_migrates_existing_line_items_table(tmp_path) -> Non
         }
 
     assert {"sku", "brand", "discount_minor", "subcategory"} <= columns
+
+    with connect(database_path) as connection:
+        receipt_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(receipts)"
+            ).fetchall()
+        }
+
+    assert "item_count" in receipt_columns

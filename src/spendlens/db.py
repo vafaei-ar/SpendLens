@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     fees_minor INTEGER,
     discount_minor INTEGER,
     total_minor INTEGER NOT NULL,
+    item_count INTEGER CHECK (item_count IS NULL OR item_count >= 0),
     transaction_type TEXT NOT NULL CHECK (
         transaction_type IN ('purchase', 'refund', 'return')
     ),
@@ -143,6 +144,17 @@ CREATE INDEX IF NOT EXISTS idx_review_message
 
 
 def _migrate_schema(connection: sqlite3.Connection) -> None:
+    receipt_columns = {
+        str(row["name"])
+        for row in connection.execute(
+            "PRAGMA table_info(receipts)"
+        ).fetchall()
+    }
+    if "item_count" not in receipt_columns:
+        connection.execute(
+            "ALTER TABLE receipts ADD COLUMN item_count INTEGER"
+        )
+
     columns = {
         str(row["name"])
         for row in connection.execute(
@@ -411,10 +423,11 @@ def persist_receipt(
             fees_minor,
             discount_minor,
             total_minor,
+            item_count,
             transaction_type,
             status
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             extraction.merchant,
@@ -433,6 +446,7 @@ def persist_receipt(
             _minor_or_none(extraction.fees, exponent),
             _minor_or_none(extraction.discount, exponent),
             decimal_to_minor(extraction.total, exponent),
+            extraction.item_count,
             extraction.transaction_type.value,
             status,
         ),

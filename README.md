@@ -51,11 +51,12 @@ Derived processing images are not retained. They can be regenerated from the sou
 The default path is now API-first:
 
 1. Gemini 3.8 Flash transcribes the receipt image using ultra-high media resolution
-2. Gemini converts the transcription into a schema-constrained receipt object
-3. SpendLens deterministically recovers clearly labeled subtotal/tax/total values from the transcript when needed
-4. if the result is still incomplete, SpendLens automatically retries direct image-to-schema extraction
-5. SpendLens applies deterministic validation
-6. accepted receipt-level fields and item-level data are written to local SQLite
+2. Gemini converts the transcription into a schema-constrained receipt header/summary
+3. a dedicated Gemini line-item pass extracts every readable purchased item and the printed item count
+4. SpendLens merges the item pass with the receipt header and deterministically recovers clearly labeled subtotal/tax/total values
+5. if the result is still incomplete, SpendLens automatically retries direct image-to-schema extraction
+6. SpendLens applies deterministic validation, including item-completeness checks
+7. accepted receipt-level fields and item-level data are written to local SQLite
 
 The model is asked to extract every readable purchased item, not just the total. Each line item can retain:
 
@@ -70,6 +71,8 @@ The model is asked to extract every readable purchased item, not just the total.
 - subcategory such as fruit, vegetables, meat_seafood, dairy_eggs, cleaning, or toiletries
 
 This item-level history is intended to support later deterministic analytics such as grocery spend, fruit spend, frequently purchased products, and unusual items relative to the user's own purchase history.
+
+A normal positive purchase no longer auto-saves with zero line items. If a receipt prints an item count, SpendLens also blocks automatic acceptance when fewer item records were extracted than the printed count. This favors review over silently saving analytically incomplete receipts.
 
 Set the required API configuration:
 

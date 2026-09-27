@@ -100,13 +100,31 @@ class LineItem(BaseModel):
         return stripped or None
 
 
+class LineItemsExtraction(BaseModel):
+    """Dedicated schema for exhaustive line-item extraction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Printed item count/items sold when explicitly shown on receipt."
+        ),
+    )
+    line_items: list[LineItem] = Field(
+        default_factory=list,
+        description="Every readable purchased item from the receipt.",
+    )
+
+
 class ReceiptExtraction(BaseModel):
     """Strict extraction contract.
 
     Critical receipt fields may be null when the source cannot support a
-    reliable value. Line items are best-effort but should be exhaustive when
-    readable. The deterministic validator decides whether the receipt itself
-    can be auto-accepted.
+    reliable value. Purchased line items should be exhaustive when readable.
+    The deterministic validator blocks automatic acceptance when purchase
+    items are missing or conflict with an explicit printed item count.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -123,6 +141,13 @@ class ReceiptExtraction(BaseModel):
     total: Decimal | None = None
     currency: str | None = None
     transaction_type: TransactionType = TransactionType.PURCHASE
+    item_count: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Printed item count/items sold when explicitly shown on receipt."
+        ),
+    )
     line_items: list[LineItem] = Field(
         default_factory=list,
         description=(

@@ -20,6 +20,12 @@ def receipt(
             "tax": tax,
             "total": total,
             "currency": "USD",
+            "line_items": [
+                {
+                    "description_raw": "ITEM",
+                    "amount": subtotal,
+                }
+            ],
         }
     )
 

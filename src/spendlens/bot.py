@@ -87,12 +87,16 @@ def _saved_summary(
     corrected: bool = False,
 ) -> str:
     prefix = "✅ Saved after review" if corrected else "✅ Saved automatically"
+    item_text = f"Line items: {len(extraction.line_items)}"
+    if extraction.item_count is not None:
+        item_text += f" / printed count {extraction.item_count}"
+
     return (
         f"{prefix} as receipt #{receipt_id}\n"
         f"Merchant: {extraction.merchant}\n"
         f"Date: {extraction.transaction_date}\n"
         f"Total: {extraction.total} {extraction.currency}\n"
-        f"Line items: {len(extraction.line_items)}"
+        f"{item_text}"
     )
 
 
@@ -568,6 +572,22 @@ async def accept_handler(
         extraction = ReceiptExtraction.model_validate_json(
             review["proposed_json"]
         )
+        report = validate_receipt(extraction)
+        item_blockers = {
+            issue.code
+            for issue in report.blockers
+            if issue.code in {
+                "line_items_missing",
+                "line_items_incomplete",
+            }
+        }
+        if item_blockers:
+            await message.reply_text(
+                "Cannot accept yet: purchased-item extraction is incomplete. "
+                "Discard this review and resend/reprocess the source."
+            )
+            return
+
         try:
             receipt_id = persist_receipt(
                 connection,
