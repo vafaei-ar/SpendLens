@@ -10,11 +10,12 @@ The current branch implements an end-to-end image ingestion path:
 
 1. an allowlisted Telegram user sends a receipt photo or image file
 2. SpendLens stores the exact bytes it received in immutable content-addressed storage
-3. Gemini reads the receipt image directly into a strict structured schema, including readable line items
-4. deterministic code checks critical fields and likely duplicates
-5. clean receipts are auto-saved
-6. uncertain receipts enter a Telegram review flow
-7. every extraction attempt and final receipt remain auditable
+3. Gemini transcribes the receipt at ultra-high image resolution
+4. Gemini structures that transcription into the strict receipt schema
+5. deterministic code recovers clearly labeled summary amounts and validates critical fields
+6. clean receipts are auto-saved
+7. uncertain receipts enter a Telegram review flow only after an automatic direct-image retry
+8. every extraction attempt and final receipt remain auditable
 
 PDFs are already preserved, but PDF extraction is intentionally deferred.
 
@@ -49,10 +50,12 @@ Derived processing images are not retained. They can be regenerated from the sou
 
 The default path is now API-first:
 
-1. Gemini 3.8 Flash receives the receipt image
-2. Gemini returns a schema-constrained receipt object
-3. SpendLens applies deterministic validation
-4. accepted receipt-level fields and item-level data are written to local SQLite
+1. Gemini 3.8 Flash transcribes the receipt image using ultra-high media resolution
+2. Gemini converts the transcription into a schema-constrained receipt object
+3. SpendLens deterministically recovers clearly labeled subtotal/tax/total values from the transcript when needed
+4. if the result is still incomplete, SpendLens automatically retries direct image-to-schema extraction
+5. SpendLens applies deterministic validation
+6. accepted receipt-level fields and item-level data are written to local SQLite
 
 The model is asked to extract every readable purchased item, not just the total. Each line item can retain:
 
@@ -181,7 +184,7 @@ spendlens-service uninstall
 
 The service uses `KeepAlive`, so launchd restarts it if it crashes. `stop` unloads the LaunchAgent so it stays stopped until `start` or `restart`.
 
-Telegram commands remain responsive while OCR is running. Receipt processing is serialized so only one local OCR job uses the MLX models at a time; additional receipts are queued and acknowledged immediately.
+Telegram commands remain responsive while receipt extraction is running. Receipt processing is serialized so only one receipt pipeline runs at a time; additional receipts are queued and acknowledged immediately.
 
 If you change Python environments or move the repository, run `spendlens-service install` again from the new environment/location.
 
