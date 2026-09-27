@@ -504,7 +504,13 @@ def format_receipt(receipt: dict[str, Any]) -> str:
         lines.append(f"Original: /source {source['source_id']}")
 
     items = receipt.get("line_items", [])
-    lines.append(f"Line items: {len(items)}")
+    printed_count = receipt.get("item_count")
+    if printed_count is None:
+        lines.append(f"Line items: {len(items)}")
+    else:
+        lines.append(
+            f"Line items: {len(items)} / printed count {printed_count}"
+        )
     for item in items[:20]:
         name = item["description_normalized"] or item["description_raw"]
         classification = ""
