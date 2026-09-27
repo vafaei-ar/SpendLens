@@ -31,6 +31,7 @@ Rules:
 - discount is a positive amount subtracted from subtotal
 - refunds/returns use transaction_type refund/return and negative totals
 - currency: ISO 4217 three-letter code when supported by evidence
+- item_count: printed item count/items sold when explicitly shown
 - extract EVERY readable purchased item, not just a sample
 - exclude subtotal, tax, tender/payment, change, loyalty balances,
   and receipt metadata from line_items
