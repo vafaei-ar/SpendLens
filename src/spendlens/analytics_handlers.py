@@ -50,10 +50,7 @@ async def answer_analytics_question(
 
     text = question
     if text is None:
-        if context.args:
-            text = " ".join(context.args)
-        else:
-            text = message.text
+        text = " ".join(context.args) if context.args else message.text
 
     if text is None or not text.strip():
         await message.reply_text(
