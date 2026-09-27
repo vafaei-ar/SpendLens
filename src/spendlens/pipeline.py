@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from spendlens.evidence import combine_ocr_evidence, recover_receipt_fields
 from spendlens.extraction import (
     ExtractionParseError,
     ExtractionProviderError,
@@ -46,6 +47,10 @@ class PipelineResult:
         attempt = self.chosen_attempt
         return bool(attempt is not None and attempt.cloud)
 
+    @property
+    def cloud_attempted(self) -> bool:
+        return any(attempt.cloud for attempt in self.attempts)
+
     def as_extraction_result(self) -> ExtractionResult:
         attempt = self.chosen_attempt
         if attempt is None or attempt.extraction is None:
@@ -71,11 +76,17 @@ class ReceiptExtractionPipeline:
         structurer: OllamaTextStructurer,
         gemini: GeminiReceiptExtractor | None = None,
         gemini_mode: Literal["ocr_text", "image"] = "ocr_text",
+        default_currency: str | None = None,
     ) -> None:
         self.ocr_extractors = ocr_extractors
         self.structurer = structurer
         self.gemini = gemini
         self.gemini_mode = gemini_mode
+        self.default_currency = (
+            default_currency.strip().upper()
+            if default_currency and default_currency.strip()
+            else None
+        )
 
     @property
     def description(self) -> str:
@@ -90,6 +101,18 @@ class ReceiptExtractionPipeline:
         if local_models:
             return f"{local_models} -> {self.structurer.model}{cloud}"
         return f"{self.structurer.model}{cloud}"
+
+    def _recover(
+        self,
+        extraction: ReceiptExtraction,
+        *,
+        ocr_text: str,
+    ) -> tuple[ReceiptExtraction, list[str]]:
+        return recover_receipt_fields(
+            extraction,
+            ocr_text=ocr_text,
+            default_currency=self.default_currency,
+        )
 
     def _structured_attempt(
         self,
@@ -127,7 +150,11 @@ class ReceiptExtractionPipeline:
                 error_text=str(exc),
             )
 
-        report = validate_receipt(result.extraction)
+        extraction, recovered_fields = self._recover(
+            result.extraction,
+            ocr_text=ocr.text,
+        )
+        report = validate_receipt(extraction)
         return PipelineAttempt(
             provider=f"{ocr.provider}+ollama-text",
             model_id=f"{ocr.model_id} -> {result.model_id}",
@@ -136,10 +163,20 @@ class ReceiptExtractionPipeline:
             raw_response=evidence_envelope(
                 ocr=ocr,
                 structured_response=result.raw_response,
+                recovered_fields=recovered_fields,
             ),
-            extraction=result.extraction,
+            extraction=extraction,
             validation=report,
             error_text=None,
+        )
+
+    @staticmethod
+    def _combined_ocr(evidence: list[OCRResult]) -> OCRResult:
+        model_ids = " + ".join(item.model_id for item in evidence)
+        return OCRResult(
+            text=combine_ocr_evidence(evidence),
+            provider="combined-ocr",
+            model_id=model_ids,
         )
 
     def _gemini_attempt(
@@ -151,6 +188,8 @@ class ReceiptExtractionPipeline:
     ) -> PipelineAttempt:
         if self.gemini is None:
             raise RuntimeError("Gemini fallback is not configured")
+
+        ocr_for_recovery: OCRResult | None = None
 
         try:
             if self.gemini_mode == "image":
@@ -164,12 +203,11 @@ class ReceiptExtractionPipeline:
                     raise ExtractionProviderError(
                         "No OCR evidence is available for Gemini text fallback"
                     )
-                best_ocr = max(evidence, key=lambda item: len(item.text))
-                result = self.gemini.extract_from_text(best_ocr.text)
-                envelope = evidence_envelope(
-                    ocr=best_ocr,
-                    structured_response=result.raw_response,
+                ocr_for_recovery = self._combined_ocr(evidence)
+                result = self.gemini.extract_from_text(
+                    ocr_for_recovery.text
                 )
+                envelope = None
         except ExtractionParseError as exc:
             return PipelineAttempt(
                 provider="gemini",
@@ -195,18 +233,43 @@ class ReceiptExtractionPipeline:
                 cloud=True,
             )
 
-        report = validate_receipt(result.extraction)
+        recovered_fields: list[str] = []
+        extraction = result.extraction
+        if ocr_for_recovery is not None:
+            extraction, recovered_fields = self._recover(
+                extraction,
+                ocr_text=ocr_for_recovery.text,
+            )
+            envelope = evidence_envelope(
+                ocr=ocr_for_recovery,
+                structured_response=result.raw_response,
+                recovered_fields=recovered_fields,
+            )
+        elif self.default_currency and extraction.currency is None:
+            extraction, recovered_fields = recover_receipt_fields(
+                extraction,
+                ocr_text="",
+                default_currency=self.default_currency,
+            )
+
+        report = validate_receipt(extraction)
         return PipelineAttempt(
             provider=result.provider,
             model_id=result.model_id,
             prompt_version=result.prompt_version,
             status="parsed",
-            raw_response=envelope,
-            extraction=result.extraction,
+            raw_response=envelope or result.raw_response,
+            extraction=extraction,
             validation=report,
             error_text=None,
             cloud=True,
         )
+
+    @staticmethod
+    def _blocker_count(attempt: PipelineAttempt) -> int:
+        if attempt.validation is None:
+            return 999
+        return len(attempt.validation.blockers)
 
     def run(
         self,
@@ -254,6 +317,23 @@ class ReceiptExtractionPipeline:
                         chosen_index=current_index,
                     )
 
+        if len(evidence) > 1:
+            combined_attempt = self._structured_attempt(
+                ocr=self._combined_ocr(evidence)
+            )
+            attempts.append(combined_attempt)
+            combined_index = len(attempts) - 1
+            if combined_attempt.status == "parsed":
+                parsed_indexes.append(combined_index)
+                if (
+                    combined_attempt.validation is not None
+                    and combined_attempt.validation.auto_accept
+                ):
+                    return PipelineResult(
+                        attempts=attempts,
+                        chosen_index=combined_index,
+                    )
+
         if self.gemini is not None:
             cloud_attempt = self._gemini_attempt(
                 image_bytes=image_bytes,
@@ -263,18 +343,22 @@ class ReceiptExtractionPipeline:
             attempts.append(cloud_attempt)
             cloud_index = len(attempts) - 1
             if cloud_attempt.status == "parsed":
-                return PipelineResult(
-                    attempts=attempts,
-                    chosen_index=cloud_index,
-                )
+                parsed_indexes.append(cloud_index)
+                if (
+                    cloud_attempt.validation is not None
+                    and cloud_attempt.validation.auto_accept
+                ):
+                    return PipelineResult(
+                        attempts=attempts,
+                        chosen_index=cloud_index,
+                    )
 
         if parsed_indexes:
             chosen_index = min(
                 parsed_indexes,
-                key=lambda index: len(
-                    attempts[index].validation.blockers
-                    if attempts[index].validation is not None
-                    else []
+                key=lambda index: (
+                    self._blocker_count(attempts[index]),
+                    index,
                 ),
             )
             return PipelineResult(
