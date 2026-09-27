@@ -246,10 +246,15 @@ def get_receipt(
         SELECT
             id,
             description_raw,
+            sku,
+            description_normalized,
+            brand,
             quantity,
             unit_price_minor,
+            discount_minor,
             amount_minor,
-            category
+            category,
+            subcategory
         FROM line_items
         WHERE receipt_id = ?
         ORDER BY id
@@ -501,9 +506,16 @@ def format_receipt(receipt: dict[str, Any]) -> str:
     items = receipt.get("line_items", [])
     lines.append(f"Line items: {len(items)}")
     for item in items[:20]:
+        name = item["description_normalized"] or item["description_raw"]
+        classification = ""
+        if item["category"]:
+            classification = f" · {item['category']}"
+            if item["subcategory"]:
+                classification += f"/{item['subcategory']}"
         lines.append(
-            f"- {item['description_raw']} · "
+            f"- {name} · "
             f"{_format_minor(item['amount_minor'], exponent, currency)}"
+            f"{classification}"
         )
     if len(items) > 20:
         lines.append(f"…and {len(items) - 20} more")
