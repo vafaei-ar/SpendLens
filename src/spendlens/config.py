@@ -31,6 +31,14 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="SPENDLENS_EXTRACTION_ENABLED",
     )
+    analytics_enabled: bool = Field(
+        default=True,
+        validation_alias="SPENDLENS_ANALYTICS_ENABLED",
+    )
+    analytics_model: str | None = Field(
+        default=None,
+        validation_alias="SPENDLENS_ANALYTICS_MODEL",
+    )
     default_currency: str | None = Field(
         default="USD",
         validation_alias="SPENDLENS_DEFAULT_CURRENCY",
@@ -83,6 +91,10 @@ class Settings(BaseSettings):
         default="gemini-3.8-flash",
         validation_alias="GEMINI_MODEL",
     )
+    @property
+    def query_model(self) -> str:
+        return self.analytics_model or self.gemini_model
+
     @property
     def telegram_allowed_user_ids(self) -> set[int]:
         values = {
