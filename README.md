@@ -19,6 +19,11 @@ The current branch implements an end-to-end image ingestion path:
 
 PDFs are already preserved, but PDF extraction is intentionally deferred.
 
+Natural-language analytics are also available in Telegram. Gemini translates a
+question into a closed QuerySpec, then deterministic parameterized SQLite
+queries calculate the answer. The model never writes SQL and never performs
+the spending arithmetic.
+
 ## Core rules
 
 1. Never destroy source evidence.
@@ -232,6 +237,7 @@ Routine inspection is available directly through the authorized Telegram bot. Yo
 
 ```
 /status
+/ask how much did I spend on fruit?
 /last
 /recent
 /extractions
@@ -252,6 +258,65 @@ Routine inspection is available directly through the authorized Telegram bot. Yo
 - SpendLens registers these commands with Telegram on startup, so they appear in the bot's command/menu button for authorized users.
 
 All inspection commands use the same numeric Telegram user allowlist as receipt ingestion.
+
+## Spending questions
+
+Authorized users can ask questions directly as normal Telegram text or use:
+
+~~~
+/ask how much did I spend on fruit?
+~~~
+
+Examples:
+
+~~~
+how much did I spend on groceries?
+how much did I spend at Sam's Club?
+what fruit do I buy most often?
+what items did I buy this month that I do not usually buy?
+~~~
+
+The query architecture is intentionally constrained:
+
+~~~
+natural-language question
+        ↓
+Gemini → QueryDecision / QuerySpec only
+        ↓
+schema validation
+        ↓
+hand-written parameterized SQLite analytics
+        ↓
+deterministic arithmetic and formatting
+~~~
+
+Supported first-pass metrics are total receipt spend, transaction count,
+average transaction, item-level spend, item purchase frequency, and unusual
+items.
+
+Category/subcategory questions such as groceries or fruit use line-item
+amounts, not whole-receipt totals. Merchant questions use receipt totals.
+
+"Unusual items" is deterministic: for the requested target period, SpendLens
+returns items bought no more than a configured small number of times before
+that period. It abstains until at least five earlier recorded receipts exist,
+rather than pretending one or two receipts establish a purchase pattern.
+
+All answers describe their scope as purchases recorded in SpendLens. The bot
+does not imply that receipt history represents all financial spending.
+
+The natural-language question itself is sent to the configured Gemini model
+for QuerySpec translation. Receipt rows and line-item history remain local;
+Gemini does not receive the SQLite contents for analytics.
+
+Configuration:
+
+~~~
+SPENDLENS_ANALYTICS_ENABLED=true
+SPENDLENS_ANALYTICS_MODEL=
+~~~
+
+When SPENDLENS_ANALYTICS_MODEL is empty, SpendLens reuses GEMINI_MODEL.
 
 ## Duplicate protection
 
