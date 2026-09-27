@@ -405,12 +405,6 @@ async def _receipt_handler_serial(
                 validation_json=report.model_dump_json(),
             )
 
-    if cascade.used_cloud:
-        mode = settings.gemini_fallback_mode.replace("_", " ")
-        await message.reply_text(
-            f"Cloud fallback used: {settings.gemini_model} ({mode})."
-        )
-
     if receipt_id is not None:
         await message.reply_text(
             _saved_summary(extraction, receipt_id=receipt_id)

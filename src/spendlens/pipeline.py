@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from spendlens.evidence import combine_ocr_evidence, recover_receipt_fields
 from spendlens.extraction import (
     ExtractionParseError,
     ExtractionProviderError,
@@ -62,40 +63,130 @@ class PipelineResult:
 
 
 class ReceiptExtractionPipeline:
-    """Local OCR cascade with optional Gemini fallback."""
+    """Gemini-first receipt extraction with optional local fallback."""
 
     def __init__(
         self,
         *,
-        ocr_extractors: list[MLXOCRExtractor],
-        structurer: OllamaTextStructurer,
-        gemini: GeminiReceiptExtractor | None = None,
-        gemini_mode: Literal["ocr_text", "image"] = "ocr_text",
+        gemini: GeminiReceiptExtractor,
+        default_currency: str | None = None,
+        local_fallback_enabled: bool = False,
+        ocr_extractors: list[MLXOCRExtractor] | None = None,
+        structurer: OllamaTextStructurer | None = None,
     ) -> None:
-        self.ocr_extractors = ocr_extractors
-        self.structurer = structurer
         self.gemini = gemini
-        self.gemini_mode = gemini_mode
+        self.default_currency = (
+            default_currency.strip().upper()
+            if default_currency and default_currency.strip()
+            else None
+        )
+        self.local_fallback_enabled = local_fallback_enabled
+        self.ocr_extractors = ocr_extractors or []
+        self.structurer = structurer
 
     @property
     def description(self) -> str:
+        base = f"{self.gemini.model} (Gemini image API)"
+        if not self.local_fallback_enabled:
+            return f"{base} -> local fallback off"
+
         local_models = " -> ".join(
             extractor.model for extractor in self.ocr_extractors
         )
-        cloud = (
-            f" -> {self.gemini.model} ({self.gemini_mode})"
-            if self.gemini is not None
-            else " -> cloud off"
-        )
-        if local_models:
-            return f"{local_models} -> {self.structurer.model}{cloud}"
-        return f"{self.structurer.model}{cloud}"
+        if local_models and self.structurer is not None:
+            return (
+                f"{base} -> {local_models} -> "
+                f"{self.structurer.model} (local fallback)"
+            )
+        return f"{base} -> local fallback enabled but not configured"
 
-    def _structured_attempt(
+    def _recover_currency(
+        self,
+        extraction: ReceiptExtraction,
+    ) -> tuple[ReceiptExtraction, list[str]]:
+        return recover_receipt_fields(
+            extraction,
+            ocr_text="",
+            default_currency=self.default_currency,
+        )
+
+    def _gemini_attempt(
+        self,
+        *,
+        image_bytes: bytes,
+        mime_type: str,
+    ) -> PipelineAttempt:
+        try:
+            result = self.gemini.extract_from_image(
+                image_bytes,
+                mime_type=mime_type,
+            )
+        except ExtractionParseError as exc:
+            return PipelineAttempt(
+                provider="gemini",
+                model_id=self.gemini.model,
+                prompt_version="receipt-gemini-v1",
+                status="invalid_schema",
+                raw_response=exc.raw_response,
+                extraction=None,
+                validation=None,
+                error_text=str(exc),
+                cloud=True,
+            )
+        except ExtractionProviderError as exc:
+            return PipelineAttempt(
+                provider="gemini",
+                model_id=self.gemini.model,
+                prompt_version="receipt-gemini-v1",
+                status="provider_error",
+                raw_response=None,
+                extraction=None,
+                validation=None,
+                error_text=str(exc),
+                cloud=True,
+            )
+
+        extraction, recovered_fields = self._recover_currency(
+            result.extraction
+        )
+        report = validate_receipt(extraction)
+        envelope = evidence_envelope(
+            ocr=None,
+            structured_response=result.raw_response,
+            recovered_fields=recovered_fields,
+        )
+        return PipelineAttempt(
+            provider=result.provider,
+            model_id=result.model_id,
+            prompt_version=result.prompt_version,
+            status="parsed",
+            raw_response=envelope,
+            extraction=extraction,
+            validation=report,
+            error_text=None,
+            cloud=True,
+        )
+
+    def _structured_local_attempt(
         self,
         *,
         ocr: OCRResult,
     ) -> PipelineAttempt:
+        if self.structurer is None:
+            return PipelineAttempt(
+                provider=ocr.provider,
+                model_id=ocr.model_id,
+                prompt_version="ocr-v1",
+                status="provider_error",
+                raw_response=evidence_envelope(
+                    ocr=ocr,
+                    structured_response=None,
+                ),
+                extraction=None,
+                validation=None,
+                error_text="Local structurer is not configured.",
+            )
+
         try:
             result = self.structurer.extract_from_text(ocr.text)
         except ExtractionParseError as exc:
@@ -127,7 +218,12 @@ class ReceiptExtractionPipeline:
                 error_text=str(exc),
             )
 
-        report = validate_receipt(result.extraction)
+        extraction, recovered_fields = recover_receipt_fields(
+            result.extraction,
+            ocr_text=ocr.text,
+            default_currency=self.default_currency,
+        )
+        report = validate_receipt(extraction)
         return PipelineAttempt(
             provider=f"{ocr.provider}+ollama-text",
             model_id=f"{ocr.model_id} -> {result.model_id}",
@@ -136,87 +232,28 @@ class ReceiptExtractionPipeline:
             raw_response=evidence_envelope(
                 ocr=ocr,
                 structured_response=result.raw_response,
+                recovered_fields=recovered_fields,
             ),
-            extraction=result.extraction,
+            extraction=extraction,
             validation=report,
             error_text=None,
         )
 
-    def _gemini_attempt(
-        self,
-        *,
-        image_bytes: bytes,
-        mime_type: str,
-        evidence: list[OCRResult],
-    ) -> PipelineAttempt:
-        if self.gemini is None:
-            raise RuntimeError("Gemini fallback is not configured")
+    @staticmethod
+    def _blocker_count(attempt: PipelineAttempt) -> int:
+        if attempt.validation is None:
+            return 999
+        return len(attempt.validation.blockers)
 
-        try:
-            if self.gemini_mode == "image":
-                result = self.gemini.extract_from_image(
-                    image_bytes,
-                    mime_type=mime_type,
-                )
-                envelope = result.raw_response
-            else:
-                if not evidence:
-                    raise ExtractionProviderError(
-                        "No OCR evidence is available for Gemini text fallback"
-                    )
-                best_ocr = max(evidence, key=lambda item: len(item.text))
-                result = self.gemini.extract_from_text(best_ocr.text)
-                envelope = evidence_envelope(
-                    ocr=best_ocr,
-                    structured_response=result.raw_response,
-                )
-        except ExtractionParseError as exc:
-            return PipelineAttempt(
-                provider="gemini",
-                model_id=self.gemini.model,
-                prompt_version="receipt-gemini-v1",
-                status="invalid_schema",
-                raw_response=exc.raw_response,
-                extraction=None,
-                validation=None,
-                error_text=str(exc),
-                cloud=True,
-            )
-        except ExtractionProviderError as exc:
-            return PipelineAttempt(
-                provider="gemini",
-                model_id=self.gemini.model,
-                prompt_version="receipt-gemini-v1",
-                status="provider_error",
-                raw_response=None,
-                extraction=None,
-                validation=None,
-                error_text=str(exc),
-                cloud=True,
-            )
-
-        report = validate_receipt(result.extraction)
-        return PipelineAttempt(
-            provider=result.provider,
-            model_id=result.model_id,
-            prompt_version=result.prompt_version,
-            status="parsed",
-            raw_response=envelope,
-            extraction=result.extraction,
-            validation=report,
-            error_text=None,
-            cloud=True,
-        )
-
-    def run(
+    def _run_local_fallback(
         self,
         image_bytes: bytes,
         *,
         mime_type: str,
-    ) -> PipelineResult:
-        attempts: list[PipelineAttempt] = []
+        attempts: list[PipelineAttempt],
+        parsed_indexes: list[int],
+    ) -> PipelineResult | None:
         evidence: list[OCRResult] = []
-        parsed_indexes: list[int] = []
 
         for extractor in self.ocr_extractors:
             try:
@@ -240,41 +277,85 @@ class ReceiptExtractionPipeline:
                 continue
 
             evidence.append(ocr)
-            attempt = self._structured_attempt(ocr=ocr)
+            attempt = self._structured_local_attempt(ocr=ocr)
             attempts.append(attempt)
-            current_index = len(attempts) - 1
+            index = len(attempts) - 1
             if attempt.status == "parsed":
-                parsed_indexes.append(current_index)
+                parsed_indexes.append(index)
                 if (
                     attempt.validation is not None
                     and attempt.validation.auto_accept
                 ):
                     return PipelineResult(
                         attempts=attempts,
-                        chosen_index=current_index,
+                        chosen_index=index,
                     )
 
-        if self.gemini is not None:
-            cloud_attempt = self._gemini_attempt(
-                image_bytes=image_bytes,
-                mime_type=mime_type,
-                evidence=evidence,
+        if len(evidence) > 1:
+            combined = OCRResult(
+                text=combine_ocr_evidence(evidence),
+                provider="combined-ocr",
+                model_id=" + ".join(
+                    item.model_id for item in evidence
+                ),
             )
-            attempts.append(cloud_attempt)
-            cloud_index = len(attempts) - 1
-            if cloud_attempt.status == "parsed":
+            attempt = self._structured_local_attempt(ocr=combined)
+            attempts.append(attempt)
+            index = len(attempts) - 1
+            if attempt.status == "parsed":
+                parsed_indexes.append(index)
+                if (
+                    attempt.validation is not None
+                    and attempt.validation.auto_accept
+                ):
+                    return PipelineResult(
+                        attempts=attempts,
+                        chosen_index=index,
+                    )
+
+        return None
+
+    def run(
+        self,
+        image_bytes: bytes,
+        *,
+        mime_type: str,
+    ) -> PipelineResult:
+        attempts: list[PipelineAttempt] = []
+        parsed_indexes: list[int] = []
+
+        gemini_attempt = self._gemini_attempt(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+        )
+        attempts.append(gemini_attempt)
+        if gemini_attempt.status == "parsed":
+            parsed_indexes.append(0)
+            if (
+                gemini_attempt.validation is not None
+                and gemini_attempt.validation.auto_accept
+            ):
                 return PipelineResult(
                     attempts=attempts,
-                    chosen_index=cloud_index,
+                    chosen_index=0,
                 )
+
+        if self.local_fallback_enabled:
+            local_result = self._run_local_fallback(
+                image_bytes,
+                mime_type=mime_type,
+                attempts=attempts,
+                parsed_indexes=parsed_indexes,
+            )
+            if local_result is not None:
+                return local_result
 
         if parsed_indexes:
             chosen_index = min(
                 parsed_indexes,
-                key=lambda index: len(
-                    attempts[index].validation.blockers
-                    if attempts[index].validation is not None
-                    else []
+                key=lambda index: (
+                    self._blocker_count(attempts[index]),
+                    index,
                 ),
             )
             return PipelineResult(

@@ -1,3 +1,5 @@
+import sqlite3
+
 from spendlens.db import (
     connect,
     find_possible_duplicates,
@@ -94,3 +96,108 @@ def test_transaction_level_duplicate_detection(tmp_path) -> None:
 
     assert len(candidates) == 1
     assert candidates[0]["merchant_raw"] == "Example Market"
+
+
+
+def test_rich_line_items_are_persisted_for_later_analytics(tmp_path) -> None:
+    source = store_source_bytes(
+        b"rich-line-items",
+        data_dir=tmp_path,
+        mime_type="image/jpeg",
+    )
+    database_path = initialize_database(tmp_path)
+    extraction = ReceiptExtraction.model_validate(
+        {
+            "merchant": "Example Market",
+            "transaction_date": "2026-09-24",
+            "subtotal": "6.87",
+            "tax": "0.00",
+            "total": "6.87",
+            "currency": "USD",
+            "line_items": [
+                {
+                    "description_raw": "326086 GOLDKIWI 2LF",
+                    "sku": "326086",
+                    "description_normalized": "Gold kiwi 2 lb",
+                    "brand": None,
+                    "quantity": "1",
+                    "unit_price": "6.87",
+                    "discount": "0.00",
+                    "amount": "6.87",
+                    "category": "groceries",
+                    "subcategory": "fruit",
+                }
+            ],
+        }
+    )
+
+    with connect(database_path) as connection:
+        source_id = record_source_document(connection, source)
+        receipt_id = persist_receipt(
+            connection,
+            extraction=extraction,
+            source_document_id=source_id,
+            status="accepted",
+            actor="test",
+        )
+        row = connection.execute(
+            """
+            SELECT
+                sku,
+                description_raw,
+                description_normalized,
+                brand,
+                quantity,
+                unit_price_minor,
+                discount_minor,
+                amount_minor,
+                category,
+                subcategory
+            FROM line_items
+            WHERE receipt_id = ?
+            """,
+            (receipt_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row["sku"] == "326086"
+    assert row["description_raw"] == "326086 GOLDKIWI 2LF"
+    assert row["description_normalized"] == "Gold kiwi 2 lb"
+    assert row["quantity"] == "1"
+    assert row["unit_price_minor"] == 687
+    assert row["discount_minor"] == 0
+    assert row["amount_minor"] == 687
+    assert row["category"] == "groceries"
+    assert row["subcategory"] == "fruit"
+
+
+def test_initialize_database_migrates_existing_line_items_table(tmp_path) -> None:
+    database_path = tmp_path / "spendlens.sqlite"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE line_items (
+                id INTEGER PRIMARY KEY,
+                receipt_id INTEGER NOT NULL,
+                description_raw TEXT NOT NULL,
+                description_normalized TEXT,
+                quantity TEXT,
+                unit_price_minor INTEGER,
+                amount_minor INTEGER NOT NULL,
+                category TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+    initialize_database(tmp_path)
+
+    with connect(database_path) as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(line_items)"
+            ).fetchall()
+        }
+
+    assert {"sku", "brand", "discount_minor", "subcategory"} <= columns

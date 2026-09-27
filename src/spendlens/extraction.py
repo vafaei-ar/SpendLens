@@ -29,7 +29,20 @@ Rules:
 - discount is a positive amount subtracted from subtotal
 - refunds/returns use transaction_type refund/return and negative totals
 - currency: ISO 4217 three-letter code when supported by evidence
-- line_items are best effort; preserve cryptic descriptions rather than guessing
+- extract EVERY readable purchased item, not just a sample
+- exclude subtotal, tax, tender/payment, change, loyalty balances,
+  and receipt metadata from line_items
+- description_raw should preserve the printed receipt description
+- sku should preserve a printed item/product code when visible
+- description_normalized should be a concise human-readable product name
+- brand should be set only when supported by the receipt
+- extract quantity and unit_price when printed or clearly represented
+- line-item discount is positive; amount is the final charged line amount
+- category should describe the broad purchase type
+- subcategory should be as specific as the schema allows,
+  for example fruit or meat_seafood
+- preserve uncertain cryptic descriptions in description_raw
+  rather than inventing a product identity
 """
 
 _RECEIPT_IMAGE_PROMPT = (
@@ -459,12 +472,14 @@ def evidence_envelope(
     *,
     ocr: OCRResult | None,
     structured_response: str | None,
+    recovered_fields: list[str] | None = None,
 ) -> str | None:
     if ocr is None and structured_response is None:
         return None
 
     payload: dict[str, Any] = {
         "structured_response": structured_response,
+        "deterministic_recovered_fields": recovered_fields or [],
     }
     if ocr is not None:
         payload.update(

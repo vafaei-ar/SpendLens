@@ -1,6 +1,6 @@
 # SpendLens
 
-SpendLens is a local-first receipt capture and spending analysis system. A private Telegram bot preserves receipt source evidence, extracts structured purchase data with a local vision model, validates critical fields with deterministic code, and stores accepted records in local SQLite.
+SpendLens is a local-data-first receipt capture and spending analysis system. A private Telegram bot preserves receipt source evidence locally, extracts structured purchase data with the configured AI provider, validates critical fields with deterministic code, and stores accepted records in local SQLite.
 
 The database and source evidence are the source of truth. The model is not.
 
@@ -10,7 +10,7 @@ The current branch implements an end-to-end image ingestion path:
 
 1. an allowlisted Telegram user sends a receipt photo or image file
 2. SpendLens stores the exact bytes it received in immutable content-addressed storage
-3. specialized local OCR models read the receipt, then a local text model structures it
+3. Gemini reads the receipt image directly into a strict structured schema, including readable line items
 4. deterministic code checks critical fields and likely duplicates
 5. clean receipts are auto-saved
 6. uncertain receipts enter a Telegram review flow
@@ -45,57 +45,89 @@ Source filenames are derived from SHA-256 hashes. SQLite stores the relative pat
 
 Derived processing images are not retained. They can be regenerated from the source.
 
-## Local extraction cascade
+## Receipt extraction
 
-SpendLens now separates OCR from receipt structuring.
+The default path is now API-first:
 
-The default Apple Silicon path is:
+1. Gemini 3.8 Flash receives the receipt image
+2. Gemini returns a schema-constrained receipt object
+3. SpendLens applies deterministic validation
+4. accepted receipt-level fields and item-level data are written to local SQLite
 
-1. PaddleOCR-VL-1.6 4-bit through MLX for primary OCR
-2. Qwen3 4B Instruct through Ollama to turn OCR evidence into the strict receipt schema
-3. dots.ocr 4-bit through MLX as a second local OCR attempt when the first result fails deterministic validation
-4. optional Gemini 3.8 Flash fallback, disabled by default
+The model is asked to extract every readable purchased item, not just the total. Each line item can retain:
 
-This avoids asking a small general vision model to solve OCR and schema generation in one step.
+- raw printed description
+- printed SKU/product code when visible
+- normalized human-readable item name
+- brand when supported
+- quantity and unit price
+- item-level discount
+- final charged amount
+- broad category such as groceries or household
+- subcategory such as fruit, vegetables, meat_seafood, dairy_eggs, cleaning, or toiletries
 
-Install the local MLX runtime and development dependencies:
+This item-level history is intended to support later deterministic analytics such as grocery spend, fruit spend, frequently purchased products, and unusual items relative to the user's own purchase history.
 
-~~~
-python -m pip install -e ".[dev,mac]"
-ollama pull qwen3:4b-instruct
-~~~
-
-The MLX models download from Hugging Face on first use. The defaults are:
-
-~~~
-LOCAL_OCR_PRIMARY_MODEL=mlx-community/PaddleOCR-VL-1.6-4bit
-LOCAL_OCR_SECONDARY_ENABLED=true
-LOCAL_OCR_SECONDARY_MODEL=mlx-community/dots.ocr-4bit
-OLLAMA_STRUCTURER_MODEL=qwen3:4b-instruct
-~~~
-
-Every structured attempt is stored in SQLite. The bot can show the attempt history with /extractions.
-
-### Optional Gemini fallback
-
-Cloud fallback is off unless explicitly enabled:
+Set the required API configuration:
 
 ~~~
-CLOUD_FALLBACK_ENABLED=false
-GEMINI_API_KEY=
+GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.8-flash
-GEMINI_FALLBACK_MODE=ocr_text
+SPENDLENS_DEFAULT_CURRENCY=USD
 ~~~
 
-Install the optional Google SDK with:
+The default currency is only used when the receipt/model omits a currency value. It is configurable and should match the user's normal receipt environment.
+
+### Optional local fallback
+
+Local OCR is disabled by default:
 
 ~~~
-python -m pip install -e ".[gemini]"
+LOCAL_FALLBACK_ENABLED=false
 ~~~
 
-The privacy-first mode is ocr_text. In that mode, Gemini receives only locally extracted OCR text, not the receipt image. Set GEMINI_FALLBACK_MODE=image only if you explicitly want the original receipt image sent to Google when local extraction fails.
+If explicitly enabled, SpendLens can fall back to PaddleOCR-VL/dots.ocr through MLX plus a local Ollama text structurer after a Gemini result fails validation. This path requires the optional mac dependencies and Ollama:
 
-As of September 2026, Google's Gemini API pricing documentation says free-tier content may be used to improve Google products, while paid-tier content is not used for that purpose. For financial receipts, paid API usage is the safer cloud option.
+~~~
+python -m pip install -e ".[mac]"
+ollama pull qwen3:4b-instruct
+LOCAL_FALLBACK_ENABLED=true
+~~~
+
+### Remove local model caches
+
+If local fallback is disabled, the MLX OCR model caches are not needed. Inspect the Hugging Face cache first:
+
+~~~
+hf cache ls --sort size
+~~~
+
+Preview removal:
+
+~~~
+hf cache rm model/mlx-community/PaddleOCR-VL-1.6-4bit \
+  model/mlx-community/dots.ocr-4bit --dry-run
+~~~
+
+Then remove them:
+
+~~~
+hf cache rm model/mlx-community/PaddleOCR-VL-1.6-4bit \
+  model/mlx-community/dots.ocr-4bit -y
+~~~
+
+If Qwen3 was installed only for SpendLens local fallback, it can also be removed from Ollama:
+
+~~~
+ollama rm qwen3:4b-instruct
+~~~
+
+SpendLens source images, SQLite data, and audit history are not affected by deleting model caches.
+
+### Cloud privacy
+
+Receipt images are sent to the Gemini API in the default configuration. As of September 2026, Google's Gemini API documentation says free-tier content may be used to improve Google products, while paid-tier content is not used for that purpose. Financial receipts should use the paid API tier when that privacy distinction matters.
+
 
 ## Local development
 
@@ -104,7 +136,7 @@ Requires Python 3.11 or newer.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,mac]"
+python -m pip install -e ".[dev]"
 cp .env.example .env
 ```
 
@@ -112,6 +144,7 @@ Set:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_ALLOWED_USER_IDS`
+- `GEMINI_API_KEY`
 
 Then run:
 
@@ -128,7 +161,7 @@ On macOS, SpendLens can run as a user LaunchAgent under launchd. After the one-t
 From the SpendLens repository:
 
 ```bash
-python -m pip install -e ".[dev,mac]"
+python -m pip install -e ".[dev]"
 spendlens-service install
 ```
 

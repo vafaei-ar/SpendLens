@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +30,14 @@ class Settings(BaseSettings):
     extraction_enabled: bool = Field(
         default=True,
         validation_alias="SPENDLENS_EXTRACTION_ENABLED",
+    )
+    default_currency: str | None = Field(
+        default="USD",
+        validation_alias="SPENDLENS_DEFAULT_CURRENCY",
+    )
+    local_fallback_enabled: bool = Field(
+        default=False,
+        validation_alias="LOCAL_FALLBACK_ENABLED",
     )
 
     local_ocr_primary_model: str = Field(
@@ -68,10 +75,6 @@ class Settings(BaseSettings):
         gt=0,
     )
 
-    cloud_fallback_enabled: bool = Field(
-        default=False,
-        validation_alias="CLOUD_FALLBACK_ENABLED",
-    )
     gemini_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="GEMINI_API_KEY",
@@ -80,11 +83,6 @@ class Settings(BaseSettings):
         default="gemini-3.8-flash",
         validation_alias="GEMINI_MODEL",
     )
-    gemini_fallback_mode: Literal["ocr_text", "image"] = Field(
-        default="ocr_text",
-        validation_alias="GEMINI_FALLBACK_MODE",
-    )
-
     @property
     def telegram_allowed_user_ids(self) -> set[int]:
         values = {
