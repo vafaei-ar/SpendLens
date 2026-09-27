@@ -14,6 +14,7 @@ def receipt(
     total: str = "10.60",
     subtotal: str = "10.00",
     tax: str = "0.60",
+    currency: str | None = "USD",
 ) -> ReceiptExtraction:
     return ReceiptExtraction.model_validate(
         {
@@ -22,16 +23,48 @@ def receipt(
             "subtotal": subtotal,
             "tax": tax,
             "total": total,
-            "currency": "USD",
+            "currency": currency,
         }
     )
+
+
+class FakeGemini:
+    model = "gemini-test"
+
+    def __init__(
+        self,
+        extraction: ReceiptExtraction | None,
+        *,
+        fail: bool = False,
+    ) -> None:
+        self.extraction = extraction
+        self.fail = fail
+        self.image_calls = 0
+
+    def extract_from_image(
+        self,
+        image_bytes: bytes,
+        *,
+        mime_type: str,
+    ) -> ExtractionResult:
+        self.image_calls += 1
+        if self.fail:
+            raise ExtractionProviderError("synthetic Gemini failure")
+        if self.extraction is None:
+            raise AssertionError("Missing fake extraction")
+        return ExtractionResult(
+            extraction=self.extraction,
+            raw_response=self.extraction.model_dump_json(),
+            provider="gemini",
+            model_id=self.model,
+            prompt_version="test-gemini",
+        )
 
 
 @dataclass
 class FakeOCR:
     model: str
     text: str
-    fail: bool = False
     calls: int = 0
 
     def extract_text(
@@ -41,8 +74,6 @@ class FakeOCR:
         mime_type: str,
     ) -> OCRResult:
         self.calls += 1
-        if self.fail:
-            raise ExtractionProviderError("synthetic OCR failure")
         return OCRResult(
             text=self.text,
             provider="fake-ocr",
@@ -55,66 +86,31 @@ class FakeStructurer:
 
     def __init__(
         self,
-        mapping: dict[str, ReceiptExtraction],
+        extraction: ReceiptExtraction,
     ) -> None:
-        self.mapping = mapping
-        self.calls: list[str] = []
+        self.extraction = extraction
+        self.calls = 0
 
     def extract_from_text(self, ocr_text: str) -> ExtractionResult:
-        self.calls.append(ocr_text)
-        extraction = self.mapping[ocr_text]
+        self.calls += 1
         return ExtractionResult(
-            extraction=extraction,
-            raw_response=extraction.model_dump_json(),
+            extraction=self.extraction,
+            raw_response=self.extraction.model_dump_json(),
             provider="fake-text",
             model_id=self.model,
             prompt_version="test-text",
         )
 
 
-class FakeGemini:
-    model = "gemini-test"
-
-    def __init__(
-        self,
-        extraction: ReceiptExtraction,
-    ) -> None:
-        self.extraction = extraction
-        self.text_calls = 0
-        self.image_calls = 0
-
-    def extract_from_text(self, ocr_text: str) -> ExtractionResult:
-        self.text_calls += 1
-        return ExtractionResult(
-            extraction=self.extraction,
-            raw_response=self.extraction.model_dump_json(),
-            provider="gemini",
-            model_id=self.model,
-            prompt_version="test-gemini",
-        )
-
-    def extract_from_image(
-        self,
-        image_bytes: bytes,
-        *,
-        mime_type: str,
-    ) -> ExtractionResult:
-        self.image_calls += 1
-        return self.extract_from_text("image")
-
-
-def test_primary_local_success_stops_cascade() -> None:
-    primary = FakeOCR("primary", "primary text")
-    secondary = FakeOCR("secondary", "secondary text")
-    structurer = FakeStructurer(
-        {
-            "primary text": receipt(),
-            "secondary text": receipt(),
-        }
-    )
+def test_gemini_image_is_primary_and_skips_local_on_success() -> None:
+    gemini = FakeGemini(receipt())
+    local = FakeOCR("local", "SUBTOTAL 10.00\nTAX 0.60\nTOTAL 10.60")
+    structurer = FakeStructurer(receipt())
 
     pipeline = ReceiptExtractionPipeline(
-        ocr_extractors=[primary, secondary],
+        gemini=gemini,
+        local_fallback_enabled=True,
+        ocr_extractors=[local],
         structurer=structurer,
     )
     result = pipeline.run(
@@ -123,23 +119,88 @@ def test_primary_local_success_stops_cascade() -> None:
     )
 
     assert result.chosen_index == 0
-    assert primary.calls == 1
-    assert secondary.calls == 0
-    assert result.used_cloud is False
+    assert result.used_cloud
+    assert gemini.image_calls == 1
+    assert local.calls == 0
+    assert structurer.calls == 0
 
 
-def test_secondary_local_runs_when_primary_fails_validation() -> None:
-    primary = FakeOCR("primary", "bad text")
-    secondary = FakeOCR("secondary", "good text")
-    structurer = FakeStructurer(
-        {
-            "bad text": receipt(total="11.60"),
-            "good text": receipt(),
-        }
+def test_default_currency_is_applied_to_gemini_result() -> None:
+    gemini = FakeGemini(receipt(currency=None))
+    pipeline = ReceiptExtractionPipeline(
+        gemini=gemini,
+        default_currency="USD",
     )
 
+    result = pipeline.run(
+        b"image",
+        mime_type="image/jpeg",
+    )
+
+    assert result.chosen_attempt is not None
+    assert result.chosen_attempt.extraction is not None
+    assert result.chosen_attempt.extraction.currency == "USD"
+    assert result.chosen_attempt.validation is not None
+    assert result.chosen_attempt.validation.auto_accept
+
+
+def test_gemini_review_result_is_returned_when_local_fallback_off() -> None:
+    gemini = FakeGemini(receipt(total="11.60"))
     pipeline = ReceiptExtractionPipeline(
-        ocr_extractors=[primary, secondary],
+        gemini=gemini,
+        local_fallback_enabled=False,
+    )
+
+    result = pipeline.run(
+        b"image",
+        mime_type="image/jpeg",
+    )
+
+    assert result.chosen_index == 0
+    assert result.chosen_attempt is not None
+    assert result.chosen_attempt.validation is not None
+    assert not result.chosen_attempt.validation.auto_accept
+
+
+def test_local_fallback_can_replace_failed_gemini_validation() -> None:
+    gemini = FakeGemini(receipt(total="11.60"))
+    local = FakeOCR(
+        "local",
+        "SUBTOTAL 10.00\nTAX 0.60\nTOTAL 10.60",
+    )
+    structurer = FakeStructurer(receipt())
+
+    pipeline = ReceiptExtractionPipeline(
+        gemini=gemini,
+        local_fallback_enabled=True,
+        ocr_extractors=[local],
+        structurer=structurer,
+    )
+    result = pipeline.run(
+        b"image",
+        mime_type="image/jpeg",
+    )
+
+    assert result.chosen_index == 1
+    assert result.chosen_attempt is not None
+    assert not result.chosen_attempt.cloud
+    assert result.chosen_attempt.validation is not None
+    assert result.chosen_attempt.validation.auto_accept
+    assert local.calls == 1
+
+
+def test_local_fallback_can_run_when_gemini_provider_fails() -> None:
+    gemini = FakeGemini(None, fail=True)
+    local = FakeOCR(
+        "local",
+        "SUBTOTAL 10.00\nTAX 0.60\nTOTAL 10.60",
+    )
+    structurer = FakeStructurer(receipt())
+
+    pipeline = ReceiptExtractionPipeline(
+        gemini=gemini,
+        local_fallback_enabled=True,
+        ocr_extractors=[local],
         structurer=structurer,
     )
     result = pipeline.run(
@@ -152,84 +213,3 @@ def test_secondary_local_runs_when_primary_fails_validation() -> None:
     assert result.chosen_attempt is not None
     assert result.chosen_attempt.validation is not None
     assert result.chosen_attempt.validation.auto_accept
-
-
-def test_gemini_text_fallback_runs_after_local_validation_failures() -> None:
-    primary = FakeOCR("primary", "short")
-    secondary = FakeOCR("secondary", "much longer OCR evidence")
-    structurer = FakeStructurer(
-        {
-            "short": receipt(total="11.60"),
-            "much longer OCR evidence": receipt(total="12.60"),
-        }
-    )
-    gemini = FakeGemini(receipt())
-
-    pipeline = ReceiptExtractionPipeline(
-        ocr_extractors=[primary, secondary],
-        structurer=structurer,
-        gemini=gemini,
-        gemini_mode="ocr_text",
-    )
-    result = pipeline.run(
-        b"image",
-        mime_type="image/jpeg",
-    )
-
-    assert result.used_cloud
-    assert result.chosen_attempt is not None
-    assert result.chosen_attempt.model_id == "gemini-test"
-    assert gemini.text_calls == 1
-    assert gemini.image_calls == 0
-
-
-def test_gemini_image_fallback_can_run_without_ocr_evidence() -> None:
-    primary = FakeOCR("primary", "", fail=True)
-    structurer = FakeStructurer({})
-    gemini = FakeGemini(receipt())
-
-    pipeline = ReceiptExtractionPipeline(
-        ocr_extractors=[primary],
-        structurer=structurer,
-        gemini=gemini,
-        gemini_mode="image",
-    )
-    result = pipeline.run(
-        b"image",
-        mime_type="image/jpeg",
-    )
-
-    assert result.used_cloud
-    assert gemini.image_calls == 1
-
-
-def test_best_local_failure_is_returned_for_manual_review() -> None:
-    primary = FakeOCR("primary", "bad")
-    secondary = FakeOCR("secondary", "less bad")
-    structurer = FakeStructurer(
-        {
-            "bad": ReceiptExtraction.model_validate(
-                {
-                    "merchant": None,
-                    "transaction_date": None,
-                    "total": None,
-                    "currency": None,
-                }
-            ),
-            "less bad": receipt(total="11.60"),
-        }
-    )
-
-    pipeline = ReceiptExtractionPipeline(
-        ocr_extractors=[primary, secondary],
-        structurer=structurer,
-    )
-    result = pipeline.run(
-        b"image",
-        mime_type="image/jpeg",
-    )
-
-    assert result.chosen_index == 1
-    assert result.chosen_attempt is not None
-    assert result.chosen_attempt.validation is not None
-    assert not result.chosen_attempt.validation.auto_accept
