@@ -69,11 +69,15 @@ CREATE TABLE IF NOT EXISTS line_items (
     id INTEGER PRIMARY KEY,
     receipt_id INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
     description_raw TEXT NOT NULL,
+    sku TEXT,
     description_normalized TEXT,
+    brand TEXT,
     quantity TEXT,
     unit_price_minor INTEGER,
+    discount_minor INTEGER,
     amount_minor INTEGER NOT NULL,
     category TEXT,
+    subcategory TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -138,11 +142,45 @@ CREATE INDEX IF NOT EXISTS idx_review_message
 """
 
 
+def _migrate_schema(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"])
+        for row in connection.execute(
+            "PRAGMA table_info(line_items)"
+        ).fetchall()
+    }
+    additions = {
+        "sku": "TEXT",
+        "brand": "TEXT",
+        "discount_minor": "INTEGER",
+        "subcategory": "TEXT",
+    }
+    for column, declaration in additions.items():
+        if column not in columns:
+            connection.execute(
+                f"ALTER TABLE line_items ADD COLUMN {column} {declaration}"
+            )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_line_items_normalized
+        ON line_items(description_normalized)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_line_items_category
+        ON line_items(category, subcategory)
+        """
+    )
+
+
 def initialize_database(data_dir: Path) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     database_path = data_dir / "spendlens.sqlite"
     with connect(database_path) as connection:
         connection.executescript(SCHEMA)
+        _migrate_schema(connection)
     return database_path
 
 
@@ -419,20 +457,34 @@ def persist_receipt(
             INSERT INTO line_items (
                 receipt_id,
                 description_raw,
+                sku,
+                description_normalized,
+                brand,
                 quantity,
                 unit_price_minor,
+                discount_minor,
                 amount_minor,
-                category
+                category,
+                subcategory
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 receipt_id,
                 item.description_raw,
+                item.sku,
+                item.description_normalized,
+                item.brand,
                 str(item.quantity) if item.quantity is not None else None,
                 _minor_or_none(item.unit_price, exponent),
+                _minor_or_none(item.discount, exponent),
                 decimal_to_minor(item.amount, exponent),
-                item.category,
+                item.category.value if item.category is not None else None,
+                (
+                    item.subcategory.value
+                    if item.subcategory is not None
+                    else None
+                ),
             ),
         )
 
