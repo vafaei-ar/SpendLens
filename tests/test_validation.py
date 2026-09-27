@@ -13,6 +13,12 @@ def base_receipt(**overrides: object) -> ReceiptExtraction:
         "tax": "0.60",
         "total": "10.60",
         "currency": "USD",
+        "line_items": [
+            {
+                "description_raw": "ITEM",
+                "amount": "10.00",
+            }
+        ],
     }
     data.update(overrides)
     return ReceiptExtraction.model_validate(data)
@@ -96,3 +102,26 @@ def test_refund_must_be_negative() -> None:
         today=date(2026, 9, 25),
     )
     assert report.auto_accept
+
+
+
+def test_missing_line_items_requires_review() -> None:
+    report = validate_receipt(
+        base_receipt(line_items=[]),
+        today=date(2026, 9, 25),
+    )
+    assert not report.auto_accept
+    assert "line_items_missing" in {
+        issue.code for issue in report.blockers
+    }
+
+
+def test_printed_item_count_incomplete_requires_review() -> None:
+    report = validate_receipt(
+        base_receipt(item_count=2),
+        today=date(2026, 9, 25),
+    )
+    assert not report.auto_accept
+    assert "line_items_incomplete" in {
+        issue.code for issue in report.blockers
+    }
