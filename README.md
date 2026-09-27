@@ -281,7 +281,9 @@ The query architecture is intentionally constrained:
 ~~~
 natural-language question
         ↓
-Gemini → QueryDecision / QuerySpec only
+local deterministic parser for common questions
+        ↓ (only when needed)
+Gemini → QueryDecision / QuerySpec fallback
         ↓
 schema validation
         ↓
@@ -305,9 +307,15 @@ rather than pretending one or two receipts establish a purchase pattern.
 All answers describe their scope as purchases recorded in SpendLens. The bot
 does not imply that receipt history represents all financial spending.
 
-The natural-language question itself is sent to the configured Gemini model
-for QuerySpec translation. Receipt rows and line-item history remain local;
-Gemini does not receive the SQLite contents for analytics.
+Common analytics questions are translated locally and do not consume Gemini
+quota. Examples include spend by merchant/category/subcategory/product,
+transaction counts, average transactions, item frequency, relative date
+phrases such as this month/last month, and unusual-item questions.
+
+Only questions that the local parser cannot map safely are sent to the
+configured Gemini model for QuerySpec translation. Receipt rows and line-item
+history remain local; Gemini does not receive the SQLite contents for
+analytics.
 
 Configuration:
 
