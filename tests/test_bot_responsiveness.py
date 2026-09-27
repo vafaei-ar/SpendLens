@@ -57,7 +57,7 @@ def test_receipt_acknowledges_before_processing(monkeypatch) -> None:
         )
 
         assert message.replies == [
-            "📥 Receipt received. Processing locally…"
+            "📥 Receipt received. Reading receipt…"
         ]
         assert processed == [True]
 
