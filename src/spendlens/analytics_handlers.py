@@ -6,16 +6,20 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from spendlens.analytics import AnalyticsError, execute_analytics
 from spendlens.config import Settings
 from spendlens.db import connect
-from spendlens.query_planner import GeminiQueryPlanner, QueryPlanningError
+from spendlens.query_planner import (
+    GeminiQueryPlanner,
+    QueryPlanningError,
+    QueryRateLimitError,
+)
 from spendlens.query_spec import QueryStatus
 
 
 def build_query_planner(settings: Settings) -> GeminiQueryPlanner:
-    if settings.gemini_api_key is None:
-        raise ValueError("Analytics requires GEMINI_API_KEY")
-    api_key = settings.gemini_api_key.get_secret_value().strip()
-    if not api_key:
-        raise ValueError("Analytics requires a non-empty GEMINI_API_KEY")
+    api_key: str | None = None
+    if settings.gemini_api_key is not None:
+        candidate = settings.gemini_api_key.get_secret_value().strip()
+        api_key = candidate or None
+
     return GeminiQueryPlanner(
         api_key=api_key,
         model=settings.query_model,
@@ -64,6 +68,9 @@ async def answer_analytics_question(
     ]
     try:
         decision = await asyncio.to_thread(planner.plan, text)
+    except QueryRateLimitError as exc:
+        await message.reply_text(str(exc))
+        return
     except QueryPlanningError as exc:
         await message.reply_text(
             f"I could not translate that question safely: {exc}"
