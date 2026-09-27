@@ -87,17 +87,16 @@ def _saved_summary(
     corrected: bool = False,
 ) -> str:
     prefix = "✅ Saved after review" if corrected else "✅ Saved automatically"
+    item_text = f"Line items: {len(extraction.line_items)}"
+    if extraction.item_count is not None:
+        item_text += f" / printed count {extraction.item_count}"
+
     return (
         f"{prefix} as receipt #{receipt_id}\n"
         f"Merchant: {extraction.merchant}\n"
         f"Date: {extraction.transaction_date}\n"
         f"Total: {extraction.total} {extraction.currency}\n"
-        f"Line items: {len(extraction.line_items)}"
-        + (
-            f" / printed count {extraction.item_count}"
-            if extraction.item_count is not None
-            else ""
-        )
+        f"{item_text}"
     )
 
 
