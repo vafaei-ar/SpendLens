@@ -277,9 +277,14 @@ def _execute_receipt_metric(
                 f"{_date_scope(spec)}, total spend for {scope}:"
             ]
             for row in rows:
+                amount = _money(
+                    int(row["total_minor"]),
+                    int(row["currency_exponent"]),
+                    str(row["currency"]),
+                )
                 lines.append(
-                    f"- {_money(int(row['total_minor']), int(row['currency_exponent']), str(row['currency']))} "
-                    f"across {int(row['receipt_count'])} receipts"
+                    f"- {amount} across "
+                    f"{int(row['receipt_count'])} receipts"
                 )
             return AnalyticsResult("\n".join(lines))
 
@@ -288,10 +293,12 @@ def _execute_receipt_metric(
             f"{_date_scope(spec)} by {group_label}:"
         ]
         for row in rows:
-            lines.append(
-                f"- {row['group_value']}: "
-                f"{_money(int(row['total_minor']), int(row['currency_exponent']), str(row['currency']))}"
+            amount = _money(
+                int(row["total_minor"]),
+                int(row["currency_exponent"]),
+                str(row["currency"]),
             )
+            lines.append(f"- {row['group_value']}: {amount}")
         return AnalyticsResult("\n".join(lines))
 
     if spec.metric == QueryMetric.AVERAGE_TRANSACTION:
@@ -372,10 +379,14 @@ def _execute_item_metric(
                 f"{_date_scope(spec)}, item-level spend for {scope}:"
             ]
             for row in rows:
+                amount = _money(
+                    int(row["amount_minor"]),
+                    int(row["currency_exponent"]),
+                    str(row["currency"]),
+                )
                 lines.append(
-                    f"- {_money(int(row['amount_minor']), int(row['currency_exponent']), str(row['currency']))} "
-                    f"across {int(row['line_count'])} item lines in "
-                    f"{int(row['receipt_count'])} receipts"
+                    f"- {amount} across {int(row['line_count'])} "
+                    f"item lines in {int(row['receipt_count'])} receipts"
                 )
             return AnalyticsResult("\n".join(lines))
 
@@ -384,9 +395,13 @@ def _execute_item_metric(
             f"{_date_scope(spec)} by {group_label}:"
         ]
         for row in rows:
+            amount = _money(
+                int(row["amount_minor"]),
+                int(row["currency_exponent"]),
+                str(row["currency"]),
+            )
             lines.append(
-                f"- {row['group_value']}: "
-                f"{_money(int(row['amount_minor']), int(row['currency_exponent']), str(row['currency']))} "
+                f"- {row['group_value']}: {amount} "
                 f"({int(row['line_count'])} purchases)"
             )
         return AnalyticsResult("\n".join(lines))
@@ -562,10 +577,14 @@ def _execute_unusual_items(
             if row["last_prior_date"]
             else ", never seen before"
         )
+        amount = _money(
+            int(row["target_amount_minor"]),
+            int(row["currency_exponent"]),
+            str(row["currency"]),
+        )
         lines.append(
             f"- {row['item_name']}: {int(row['target_count'])} this period, "
-            f"{prior} prior{previous}; "
-            f"{_money(int(row['target_amount_minor']), int(row['currency_exponent']), str(row['currency']))}"
+            f"{prior} prior{previous}; {amount}"
         )
     return AnalyticsResult("\n".join(lines))
 
