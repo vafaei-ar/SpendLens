@@ -91,7 +91,8 @@ def _saved_summary(
         f"{prefix} as receipt #{receipt_id}\n"
         f"Merchant: {extraction.merchant}\n"
         f"Date: {extraction.transaction_date}\n"
-        f"Total: {extraction.total} {extraction.currency}"
+        f"Total: {extraction.total} {extraction.currency}\n"
+        f"Line items: {len(extraction.line_items)}"
     )
 
 
@@ -154,7 +155,7 @@ async def receipt_handler(
             )
         else:
             await message.reply_text(
-                "📥 Receipt received. Processing locally…"
+                "📥 Receipt received. Reading receipt…"
             )
 
     async with lock:
