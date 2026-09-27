@@ -71,7 +71,13 @@ def format_review(
         f"Tax: {extraction.tax if extraction.tax is not None else 'unknown'}\n"
         f"Total: {extraction.total if extraction.total is not None else 'unknown'}\n"
         f"Currency: {extraction.currency or 'unknown'}\n"
-        f"Type: {extraction.transaction_type.value}\n\n"
+        f"Type: {extraction.transaction_type.value}\n"
+        f"Line items: {len(extraction.line_items)}"
+        + (
+            f" / printed count {extraction.item_count}\n\n"
+            if extraction.item_count is not None
+            else "\n\n"
+        )
         f"Why review is needed:\n{reason_text}\n\n"
         "Reply to this message with a correction such as:\n"
         "total 57.82\n"
