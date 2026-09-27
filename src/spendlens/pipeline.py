@@ -88,7 +88,7 @@ class ReceiptExtractionPipeline:
     def description(self) -> str:
         base = (
             f"{self.gemini.model} "
-            "(Gemini ultra-high transcript -> structured extraction)"
+            "(Gemini ultra-high transcript -> receipt + item extraction)"
         )
         if not self.local_fallback_enabled:
             return f"{base} -> direct Gemini retry -> local fallback off"
@@ -111,6 +111,27 @@ class ReceiptExtractionPipeline:
             extraction,
             ocr_text="",
             default_currency=self.default_currency,
+        )
+
+    @staticmethod
+    def _merge_line_items(
+        extraction: ReceiptExtraction,
+        *,
+        item_extraction,
+    ) -> ReceiptExtraction:
+        line_items = extraction.line_items
+        if len(item_extraction.line_items) >= len(line_items):
+            line_items = item_extraction.line_items
+
+        item_count = extraction.item_count
+        if item_extraction.item_count is not None:
+            item_count = item_extraction.item_count
+
+        return extraction.model_copy(
+            update={
+                "line_items": line_items,
+                "item_count": item_count,
+            }
         )
 
     def _gemini_two_pass_attempt(
@@ -157,21 +178,43 @@ class ReceiptExtractionPipeline:
                 cloud=True,
             )
 
+        extraction = result.extraction
+        item_response: str | None = None
+        item_error: str | None = None
+        try:
+            item_result = self.gemini.extract_items_from_text(
+                transcript.text
+            )
+            item_response = item_result.raw_response
+            extraction = self._merge_line_items(
+                extraction,
+                item_extraction=item_result.extraction,
+            )
+        except (ExtractionParseError, ExtractionProviderError) as exc:
+            item_error = str(exc)
+
         extraction, recovered_fields = recover_receipt_fields(
-            result.extraction,
+            extraction,
             ocr_text=transcript.text,
             default_currency=self.default_currency,
         )
         report = validate_receipt(extraction)
         return PipelineAttempt(
-            provider="gemini-vision-ocr+gemini-structure",
-            model_id=f"{transcript.model_id} -> {result.model_id}",
-            prompt_version="receipt-gemini-two-pass-v1",
+            provider=(
+                "gemini-vision-ocr+gemini-structure+gemini-items"
+            ),
+            model_id=(
+                f"{transcript.model_id} -> {result.model_id} -> "
+                f"{self.gemini.model}"
+            ),
+            prompt_version="receipt-gemini-three-pass-v1",
             status="parsed",
             raw_response=evidence_envelope(
                 ocr=transcript,
                 structured_response=result.raw_response,
                 recovered_fields=recovered_fields,
+                item_response=item_response,
+                item_error=item_error,
             ),
             extraction=extraction,
             validation=report,
