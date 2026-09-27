@@ -24,6 +24,7 @@ from spendlens.inspection import (
 _HELP_TEXT = """SpendLens commands
 
 /status - database and model status
+/ask <question> - ask about recorded spending and purchases
 /last - inspect the latest uploaded receipt end to end
 /recent - recent saved receipts
 /extractions - recent AI extraction attempts
@@ -33,6 +34,10 @@ _HELP_TEXT = """SpendLens commands
 /accept <review_id> - accept a reviewed receipt
 /discard <review_id> - discard structured data, keep source
 /help - show this list
+
+You can also send a spending question as normal text, for example:
+how much did I spend on fruit?
+what items did I buy this month that I do not usually buy?
 """
 
 

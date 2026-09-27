@@ -10,6 +10,11 @@ from telegram.ext import (
     filters,
 )
 
+from spendlens.analytics_handlers import (
+    answer_analytics_question,
+    build_query_planner,
+    register_analytics_handlers,
+)
 from spendlens.config import Settings
 from spendlens.db import (
     close_review_session,
@@ -44,6 +49,7 @@ MAX_CONCURRENT_UPDATES = 8
 BOT_COMMANDS = [
     BotCommand("start", "Start SpendLens and show a quick introduction"),
     BotCommand("help", "Show available commands"),
+    BotCommand("ask", "Ask a question about recorded purchases"),
     BotCommand("status", "Show database and extraction pipeline status"),
     BotCommand("last", "Inspect the latest receipt upload end to end"),
     BotCommand("recent", "Show recent saved receipts"),
@@ -113,7 +119,8 @@ async def start_handler(
         await message.reply_text(
             "SpendLens is running. Send a receipt photo or image file. "
             "PDFs are preserved now, but PDF extraction is not enabled yet. "
-            "Use /last to inspect the latest upload or /help for commands."
+            "Use /last to inspect the latest upload, or ask a spending "
+            "question directly."
         )
 
 
@@ -441,12 +448,15 @@ async def correction_handler(
 
     message = update.effective_message
     user = update.effective_user
-    if (
-        message is None
-        or user is None
-        or message.text is None
-        or message.reply_to_message is None
-    ):
+    if message is None or user is None or message.text is None:
+        return
+
+    if message.reply_to_message is None:
+        await answer_analytics_question(
+            update,
+            context,
+            question=message.text,
+        )
         return
 
     database_path = context.application.bot_data["database_path"]
@@ -456,9 +466,16 @@ async def correction_handler(
             telegram_chat_id=message.chat_id,
             message_id=message.reply_to_message.message_id,
         )
-        if review is None:
-            return
 
+    if review is None:
+        await answer_analytics_question(
+            update,
+            context,
+            question=message.text,
+        )
+        return
+
+    with connect(database_path) as connection:
         current = ReceiptExtraction.model_validate_json(
             review["proposed_json"]
         )
@@ -678,11 +695,16 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["database_path"] = database_path
     application.bot_data["pipeline"] = pipeline
     application.bot_data["receipt_processing_lock"] = asyncio.Lock()
+    if settings.analytics_enabled:
+        application.bot_data["query_planner"] = build_query_planner(
+            settings
+        )
 
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("accept", accept_handler))
     application.add_handler(CommandHandler("discard", discard_handler))
     register_inspection_handlers(application)
+    register_analytics_handlers(application)
     application.add_handler(
         MessageHandler(
             filters.PHOTO | filters.Document.ALL,
