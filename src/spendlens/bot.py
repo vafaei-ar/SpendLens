@@ -466,14 +466,16 @@ async def correction_handler(
             telegram_chat_id=message.chat_id,
             message_id=message.reply_to_message.message_id,
         )
-        if review is None:
-            await answer_analytics_question(
-                update,
-                context,
-                question=message.text,
-            )
-            return
 
+    if review is None:
+        await answer_analytics_question(
+            update,
+            context,
+            question=message.text,
+        )
+        return
+
+    with connect(database_path) as connection:
         current = ReceiptExtraction.model_validate_json(
             review["proposed_json"]
         )
